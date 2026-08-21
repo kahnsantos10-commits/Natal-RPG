@@ -86,49 +86,9 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"handouts" | "screen" | "physical_dice" | "combat_tracker" | "tension_timer" | "improvisation">("handouts");
 
-  // Handouts state
-  const [handouts, setHandouts] = useState<Handout[]>([
-    {
-      id: "h1",
-      title: "Bilhete Rasgado com Resíduos de Lodo",
-      type: "letter",
-      system: "ordem",
-      dateOrEra: "14 de Outubro, 2024",
-      author: "Dr. Alistair Vance (Desaparecido)",
-      content:
-        "O tempo aqui dentro não corre como lá fora. Cada tique-taque do relógio do corredor central consome memórias. Se você estiver lendo isso, NÃO olhe nos espelhos com moldura dourada. O Lodo da Morte se alimenta de quem busca seu próprio reflexo...",
-      isRevealedToPlayers: true,
-      secretNotes: "Encontrado no bolso do jaleco ensanguentado no piso 2.",
-      imageUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80",
-    },
-    {
-      id: "h2",
-      title: "Laudo Necroscópico Confidencial - Caso 404",
-      type: "document",
-      system: "ordem",
-      dateOrEra: "Instituto Médico Legal - São Paulo",
-      author: "Perita Dra. Camila Rocha",
-      content:
-        "Causa mortis: Desidratação celular instantânea e envelhecimento ósseo estimado em 200 anos ocorrido em menos de 10 segundos. Nenhuma perfuração mecânica. Tecido cardíaco coberto por uma substância viscosa negra de pH nulo.",
-      isRevealedToPlayers: false,
-      secretNotes: "Requer teste de Investigação ou Medicina DT 15 para correlacionar com o Ritual de Decadência.",
-      imageUrl: "https://images.unsplash.com/photo-1568667256549-094345857637?w=600&auto=format&fit=crop&q=80",
-    },
-    {
-      id: "h3",
-      title: "Mapa Antigo das Catacumbas Esquecidas",
-      type: "photo",
-      system: "dnd5e",
-      dateOrEra: "Era dos Dragões - Reino de Cormyr",
-      author: "Cartógrafo Real Elorien",
-      content:
-        "A passagem secreta atrás do sarcófago do Rei Maldito só abre quando o cálice de prata é preenchido com água benta no solstício. Cuidado com os carniçais nas galerias subterrâneas.",
-      isRevealedToPlayers: true,
-      imageUrl: "https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?w=600&auto=format&fit=crop&q=80",
-    },
-  ]);
-
-  const [selectedHandout, setSelectedHandout] = useState<Handout>(handouts[0]);
+  // Handouts state (iniciado limpo sem exemplos pré-carregados)
+  const [handouts, setHandouts] = useState<Handout[]>([]);
+  const [selectedHandout, setSelectedHandout] = useState<Handout | null>(null);
   const [isGeneratingHandout, setIsGeneratingHandout] = useState(false);
   const [handoutPrompt, setHandoutPrompt] = useState("");
 
@@ -415,48 +375,56 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
                 </div>
 
                 <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
-                  {handouts.map((h) => {
-                    const isSelected = selectedHandout?.id === h.id;
-                    return (
-                      <div
-                        key={h.id}
-                        onClick={() => setSelectedHandout(h)}
-                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? "bg-amber-950/40 border-amber-500/70 ring-1 ring-amber-500/50 shadow"
-                            : "bg-neutral-950 border-neutral-800/80 hover:border-neutral-700"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h4 className="font-serif font-bold text-xs text-neutral-200">
-                              {h.title}
-                            </h4>
-                            <p className="text-[10px] text-neutral-400 mt-0.5">
-                              {h.author} • <span className="font-mono text-neutral-500">{h.dateOrEra}</span>
-                            </p>
+                  {handouts.length === 0 ? (
+                    <div className="text-center py-8 px-4 text-xs text-neutral-500 space-y-2 bg-neutral-950/50 rounded-2xl border border-neutral-800/50">
+                      <FileText className="w-8 h-8 text-neutral-600 mx-auto" />
+                      <p>Nenhum documento ou pista cadastrado nesta sessão.</p>
+                      <p className="text-[10px] text-neutral-600">Use o gerador de IA acima para criar uma nova pista instantaneamente.</p>
+                    </div>
+                  ) : (
+                    handouts.map((h) => {
+                      const isSelected = selectedHandout?.id === h.id;
+                      return (
+                        <div
+                          key={h.id}
+                          onClick={() => setSelectedHandout(h)}
+                          className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                            isSelected
+                              ? "bg-amber-950/40 border-amber-500/70 ring-1 ring-amber-500/50 shadow"
+                              : "bg-neutral-950 border-neutral-800/80 hover:border-neutral-700"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h4 className="font-serif font-bold text-xs text-neutral-200">
+                                {h.title}
+                              </h4>
+                              <p className="text-[10px] text-neutral-400 mt-0.5">
+                                {h.author} • <span className="font-mono text-neutral-500">{h.dateOrEra}</span>
+                              </p>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleReveal(h.id);
+                              }}
+                              className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 ${
+                                h.isRevealedToPlayers
+                                  ? "bg-emerald-950/60 border-emerald-600 text-emerald-300"
+                                  : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                              }`}
+                              title={h.isRevealedToPlayers ? "Visível no Telão dos Jogadores" : "Oculto no Telão (Privado do Mestre)"}
+                            >
+                              {h.isRevealedToPlayers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                              <span className="text-[10px] font-bold">
+                                {h.isRevealedToPlayers ? "No Telão" : "Oculto"}
+                              </span>
+                            </button>
                           </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleReveal(h.id);
-                            }}
-                            className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 ${
-                              h.isRevealedToPlayers
-                                ? "bg-emerald-950/60 border-emerald-600 text-emerald-300"
-                                : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
-                            }`}
-                            title={h.isRevealedToPlayers ? "Visível no Telão dos Jogadores" : "Oculto no Telão (Privado do Mestre)"}
-                          >
-                            {h.isRevealedToPlayers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                            <span className="text-[10px] font-bold">
-                              {h.isRevealedToPlayers ? "No Telão" : "Oculto"}
-                            </span>
-                          </button>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>

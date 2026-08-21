@@ -31,6 +31,9 @@ import { SessionManagerModal } from "./components/SessionManagerModal";
 import { MapManagerModal } from "./components/MapManagerModal";
 import { SessionHistoryModal } from "./components/SessionHistoryModal";
 import { CampaignBackupModal, CampaignBackupPayload } from "./components/CampaignBackupModal";
+import { Dice3DAnimationOverlay } from "./components/Dice3DAnimationOverlay";
+import { LoginScreen } from "./components/LoginScreen";
+import { OnboardingModal } from "./components/OnboardingModal";
 import { rpgAudio } from "./utils/audioSynth";
 import {
   Compass,
@@ -56,227 +59,101 @@ import {
   Clock,
   Layers,
   Share2,
+  LogIn,
   Database,
   RotateCcw,
-  RotateCw
+  RotateCw,
+  Trash2
 } from "lucide-react";
 
-// Default Initial Mock Data
-const defaultDnDChar: DnDCharacter = {
-  id: "dnd-char-1",
-  name: "Valerius Ashwood",
-  avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80",
-  race: "Humano (Variante)",
-  classAndLevel: "Paladino 4 (Juramento da Devoção)",
-  background: "Nobre",
-  alignment: "Leal e Bom",
-  xp: 3800,
-  inspiration: true,
+// Clean Initial Blank Data (Sem exemplos mock - Pronto para testar do zero)
+const blankDnDChar: DnDCharacter = {
+  id: "dnd-char-blank",
+  name: "Novo Herói",
+  race: "Humano",
+  classAndLevel: "Aventureiro Nível 1",
+  background: "Aventureiro",
+  alignment: "Neutro",
+  xp: 0,
+  inspiration: false,
   proficiencyBonus: 2,
-  ac: 18,
-  initiative: 1,
+  ac: 10,
+  initiative: 0,
   speed: 9,
-  hp: { current: 36, max: 36, temp: 0 },
-  hitDice: { total: 4, current: 4, die: "1d10" },
-  stats: { str: 16, dex: 12, con: 14, int: 10, wis: 12, cha: 16 },
+  hp: { current: 10, max: 10, temp: 0 },
+  hitDice: { total: 1, current: 1, die: "1d8" },
+  stats: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
   savingThrows: {
-    str: { proficient: false, modifier: 3 },
-    dex: { proficient: false, modifier: 1 },
-    con: { proficient: false, modifier: 2 },
+    str: { proficient: false, modifier: 0 },
+    dex: { proficient: false, modifier: 0 },
+    con: { proficient: false, modifier: 0 },
     int: { proficient: false, modifier: 0 },
-    wis: { proficient: true, modifier: 3 },
-    cha: { proficient: true, modifier: 5 },
+    wis: { proficient: false, modifier: 0 },
+    cha: { proficient: false, modifier: 0 },
   },
   proficiencies: {
-    skills: {
-      "Atletismo": "proficient",
-      "Persuasão": "proficient",
-      "Religião": "proficient",
-      "Intuição": "proficient",
-    },
-    armor: "Todas as armaduras, Escudos",
-    weapons: "Armas simples e marciais",
-    tools: "Alaúde",
-    languages: "Comum, Celestial",
+    skills: {},
+    armor: "Armaduras Simples",
+    weapons: "Armas Simples",
+    tools: "",
+    languages: "Comum",
   },
-  attacks: [
-    { id: "a1", name: "Espada Longa Sagrada", bonus: "+5", damage: "1d8+3", type: "Cortante/Radiante" },
-    { id: "a2", name: "Lança Montada", bonus: "+5", damage: "1d12+3", type: "Perfurante" },
-  ],
+  attacks: [],
   spellcasting: {
-    ability: "cha",
-    saveDc: 13,
-    attackBonus: 5,
+    ability: "int",
+    saveDc: 10,
+    attackBonus: 2,
     slots: {
-      1: { max: 3, used: 1 },
+      1: { max: 0, used: 0 },
       2: { max: 0, used: 0 },
     },
-    spells: [
-      {
-        id: "sp1",
-        name: "Destruição Cólera (Smite)",
-        level: 1,
-        school: "Evocação",
-        castingTime: "1 ação bônus",
-        range: "Pessoal",
-        duration: "Concentração, até 1 min",
-        prepared: true,
-        description: "Seu ataque corpo a corpo causa 1d6 de dano de fogo adicional e força o alvo a cair de bruços se falhar em teste de Força.",
-      },
-      {
-        id: "sp2",
-        name: "Curar Ferimentos",
-        level: 1,
-        school: "Evocação",
-        castingTime: "1 ação",
-        range: "Toque",
-        duration: "Instantânea",
-        prepared: true,
-        description: "Uma criatura que você tocar recupera 1d8 + modificador de conjuração em pontos de vida.",
-      },
-    ],
+    spells: [],
   },
-  equipment: [
-    { id: "eq1", name: "Cota de Malha Completa", qty: 1, weight: 25, notes: "Armadura Pesada" },
-    { id: "eq2", name: "Escudo com Brasão Solar", qty: 1, weight: 3, notes: "+2 AC" },
-    { id: "eq3", name: "Símbolo Sagrado de Platina", qty: 1, weight: 0.5, notes: "Foco de Conjuração" },
-  ],
-  currency: { cp: 15, sp: 20, ep: 0, gp: 85, pp: 2 },
-  features: [
-    { id: "f1", name: "Sentido Divino", source: "Paladino", description: "Detecta a presença de celestiais, ínferos e mortos-vivos." },
-    { id: "f2", name: "Cura pelas Mãos", source: "Paladino", description: "Reserva de 20 PVs por dia para curar toques." },
-  ],
+  equipment: [],
+  currency: { cp: 0, sp: 0, ep: 0, gp: 10, pp: 0 },
+  features: [],
 };
 
-const defaultOrdemChar: OrdemCharacter = {
-  id: "ordem-char-1",
-  name: "Arthur Cervero",
-  avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80",
-  classType: "Ocultista",
+const blankOrdemChar: OrdemCharacter = {
+  id: "ordem-char-blank",
+  name: "Agente Novo",
+  classType: "Combatente",
   origin: "Acadêmico",
-  rank: "Operador",
-  track: "Lâmina Paranormal",
-  nex: 35,
-  pePerRound: 4,
-  elementAffinity: "Morte",
-  pv: { current: 48, max: 48, temp: 0 },
-  san: { current: 42, max: 55, temp: 0 },
-  pe: { current: 28, max: 32, temp: 0 },
-  attributes: { agi: 2, for: 1, int: 4, pre: 3, vig: 2 },
-  defense: 15,
-  dodge: 20,
-  block: 5,
-  skills: {
-    "Ocultismo": { attribute: "int", training: "veterano", bonus: 10 },
-    "Investigação": { attribute: "int", training: "veterano", bonus: 10 },
-    "Vontade": { attribute: "pre", training: "treinado", bonus: 5 },
-    "Iniciativa": { attribute: "agi", training: "treinado", bonus: 5 },
-    "Pontaria": { attribute: "agi", training: "treinado", bonus: 5 },
-    "Percepção": { attribute: "pre", training: "treinado", bonus: 5 },
-    "Fortitude": { attribute: "vig", training: "treinado", bonus: 5 },
-    "Ciências": { attribute: "int", training: "treinado", bonus: 5 },
-  },
-  weapons: [
-    {
-      id: "w1",
-      name: "Revólver .38 Tático",
-      type: "Balístico",
-      damage: "2d6",
-      critical: "19/x3",
-      range: "Médio",
-      category: "I",
-      spaces: 1,
-    },
-    {
-      id: "w2",
-      name: "Adaga Ritualística de Morte",
-      type: "Perfuração/Morte",
-      damage: "1d6+2d8",
-      critical: "18/x2",
-      range: "Corpo a corpo",
-      category: "II",
-      spaces: 1,
-    },
-  ],
-  rituals: [
-    {
-      id: "r1",
-      name: "Decadência",
-      element: "Morte",
-      circle: 1,
-      costPe: 1,
-      castTime: "Padrão",
-      range: "Toque",
-      target: "1 ser",
-      duration: "Instantânea",
-      resistence: "Fortitude reduz à metade",
-      description: "Você infunde o alvo com lodo da Morte acelerando o tempo ao seu redor. Causa 2d8+2 de dano de Morte.",
-    },
-    {
-      id: "r2",
-      name: "Cicatrização Espiral",
-      element: "Sangue",
-      circle: 1,
-      costPe: 1,
-      castTime: "Padrão",
-      range: "Toque",
-      target: "1 ser",
-      duration: "Instantânea",
-      resistence: "Nenhuma",
-      description: "O fluxo sanguíneo acelera violentamente, cicatrizando cortes abertos. Cura 3d8+3 de PV (alvo sofre 1 de dano de SAN).",
-    },
-    {
-      id: "r3",
-      name: "Paradoxo Temporal",
-      element: "Morte",
-      circle: 2,
-      costPe: 3,
-      castTime: "Reação",
-      range: "Pessoal",
-      target: "Você",
-      duration: "1 rodada",
-      resistence: "Nenhuma",
-      description: "Manipula as linhas temporais locais, concedendo +5 na Defesa e permitindo uma ação de esquiva imediata.",
-    },
-  ],
-  inventory: [
-    { id: "i1", name: "Colete Leve à Prova de Balas", category: "I", spaces: 2, details: "+2 de Defesa passiva" },
-    { id: "i2", name: "Componentes Rituais de Morte (Lodo)", category: "0", spaces: 1, details: "Cinzas e lodo preservado em frasco" },
-    { id: "i3", name: "Kit de Primeiros Socorros Tático", category: "I", spaces: 1, details: "Permite testes de Medicina para estabilização" },
-  ],
-  paranormalPowers: [
-    { id: "p1", name: "Escolhido pela Morte", element: "Morte", description: "Você recebe +1 PE por rodada para conjuração de rituais de Morte." },
-  ],
+  rank: "Recruta",
+  track: "Guerreiro",
+  nex: 5,
+  pePerRound: 1,
+  pv: { current: 20, max: 20, temp: 0 },
+  san: { current: 20, max: 20, temp: 0 },
+  pe: { current: 5, max: 5, temp: 0 },
+  attributes: { agi: 1, for: 1, int: 1, pre: 1, vig: 1 },
+  defense: 10,
+  dodge: 10,
+  block: 0,
+  skills: {},
+  weapons: [],
+  rituals: [],
+  inventory: [],
+  paranormalPowers: [],
 };
 
-const defaultCustomChar: CustomCharacter = {
-  id: "custom-char-1",
-  name: "Kaelen Vane",
-  systemName: "Tormenta 20 / Fantasia Livre",
-  concept: "Guerreiro Arcano Artoniano",
-  avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80",
+const blankCustomChar: CustomCharacter = {
+  id: "custom-char-blank",
+  name: "Personagem Livre",
+  systemName: "Sistema Personalizado",
+  concept: "Novo Conceito",
   bars: [
-    { id: "b1", name: "Pontos de Vida (PV)", current: 40, max: 40, color: "bg-red-500" },
-    { id: "b2", name: "Pontos de Mana (PM)", current: 24, max: 24, color: "bg-blue-500" },
-    { id: "b3", name: "Estamina / Fôlego", current: 15, max: 15, color: "bg-amber-500" },
+    { id: "b1", name: "Pontos de Vida (PV)", current: 20, max: 20, color: "bg-red-500" },
+    { id: "b2", name: "Energia / PM", current: 10, max: 10, color: "bg-blue-500" },
   ],
   attributes: [
-    { id: "at1", name: "FOR", value: 16, modifier: "+3" },
-    { id: "at2", name: "DES", value: 14, modifier: "+2" },
-    { id: "at3", name: "CON", value: 14, modifier: "+2" },
-    { id: "at4", name: "INT", value: 12, modifier: "+1" },
-    { id: "at5", name: "SAB", value: 10, modifier: "+0" },
-    { id: "at6", name: "CAR", value: 14, modifier: "+2" },
+    { id: "at1", name: "FOR", value: 10, modifier: "+0" },
+    { id: "at2", name: "DES", value: 10, modifier: "+0" },
+    { id: "at3", name: "INT", value: 10, modifier: "+0" },
   ],
-  skills: [
-    { id: "sk1", name: "Ataque com Katana Élfica", value: 8, formula: "1d20+8" },
-    { id: "sk2", name: "Lançar Bola de Fogo Arcana", value: 10, formula: "6d6+4" },
-    { id: "sk3", name: "Reflexos Rápidos", value: 6, formula: "1d20+6" },
-  ],
-  items: [
-    { id: "it1", name: "Katana Élfica de Mitral", qty: 1, notes: "Causa dano cortante aumentado" },
-  ],
-  notes: "Treinado nos templos de Valkaria.",
+  skills: [],
+  items: [],
+  notes: "",
 };
 
 export function App() {
@@ -298,11 +175,41 @@ export function App() {
   // Session / Room State
   const [roomId, setRoomId] = useState("sala-ordem");
   const [roomCode, setRoomCode] = useState("ORDEM1");
-  const [roomName, setRoomName] = useState("Operação Calafrio");
+  const [roomName, setRoomName] = useState("Sessão Principal de RPG");
   const [system, setSystem] = useState<RPGSystem>("ordem");
   const [userRole, setUserRole] = useState<UserRole>("gm");
-  const [userName, setUserName] = useState("Mestre");
+  const [userName, setUserName] = useState("Mestre de Jogo");
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Authentication Login Screen State
+  const [showLoginScreen, setShowLoginScreen] = useState(false);
+  const [activeRevealedHandout, setActiveRevealedHandout] = useState<any | undefined>(undefined);
+
+  // Onboarding Modal
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (!localStorage.getItem("onboarding_shown")) {
+      setShowOnboarding(true);
+    }
+  }, []);
+
+  // Load saved session on mount or prompt login
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("rpg_user_session");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.system) setSystem(parsed.system);
+        if (parsed.userRole) setUserRole(parsed.userRole);
+        if (parsed.userName) setUserName(parsed.userName);
+        if (parsed.roomCode) setRoomCode(parsed.roomCode);
+        if (parsed.roomName) setRoomName(parsed.roomName);
+      }
+    } catch (e) {
+      console.warn("Nao foi possivel carregar sessao", e);
+    }
+  }, []);
 
   // Modals State
   const [showSessionManager, setShowSessionManager] = useState(false);
@@ -378,178 +285,33 @@ export function App() {
   const [showDiceDrawer, setShowDiceDrawer] = useState(false);
   const [showInitiativeDrawer, setShowInitiativeDrawer] = useState(false);
 
-  // Map Data State & Available Maps in this Session
+  // Active 3D Rolling Dice Animation State
+  const [activeRollingDice, setActiveRollingDice] = useState<DiceRollResult | null>(null);
+
+  // Map Data State & Available Maps in this Session (Iniciado Limpo do Zero)
   const [mapData, setMapData] = useState<MapData>({
-    id: "map-1",
-    name: "Mansão dos Espelhos",
-    gridWidth: 20,
-    gridHeight: 16,
+    id: "map-default",
+    name: "Mapa Inicial",
+    gridWidth: 10,
+    gridHeight: 10,
     gridSize: 50,
-    bgUrl: "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200&auto=format&fit=crop&q=80",
+    bgUrl: "",
     fogOfWar: false,
-    revealedCells: ["5,5", "5,6", "6,5", "6,6"],
-    lighting: "paranormal_fog",
+    revealedCells: [],
+    lighting: "bright",
     pings: [],
   });
 
-  const [availableMaps, setAvailableMaps] = useState<MapData[]>([
-    {
-      id: "map-1",
-      name: "Mansão dos Espelhos (Principal)",
-      gridWidth: 20,
-      gridHeight: 16,
-      gridSize: 50,
-      bgUrl: "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200&auto=format&fit=crop&q=80",
-      fogOfWar: false,
-      revealedCells: ["5,5", "5,6", "6,5", "6,6"],
-      lighting: "paranormal_fog",
-      pings: [],
-    },
-    {
-      id: "map-2",
-      name: "Laboratório Subterrâneo",
-      gridWidth: 16,
-      gridHeight: 12,
-      gridSize: 48,
-      bgUrl: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=1200&auto=format&fit=crop&q=80",
-      fogOfWar: false,
-      revealedCells: [],
-      lighting: "dim",
-      pings: [],
-    },
-  ]);
+  const [availableMaps, setAvailableMaps] = useState<MapData[]>([]);
 
-  // Session History Events
-  const [historyEvents, setHistoryEvents] = useState<SessionHistoryEvent[]>([
-    {
-      id: "hist-init-1",
-      type: "system",
-      title: "Mesa Inicializada",
-      description: "Campanha Operação Calafrio conectada com código ORDEM1.",
-      timestamp: Date.now() - 3600000,
-      author: "Sistema",
-    },
-    {
-      id: "hist-init-2",
-      type: "narration",
-      title: "Chegada à Mansão",
-      description: "Os agentes cruzaram o portão enferrujado sob chuva torrencial. O medidor de membrana oscila violentamente.",
-      timestamp: Date.now() - 1800000,
-      author: "Mestre IA",
-    },
-  ]);
+  // Session History Events (Iniciado Limpo do Zero)
+  const [historyEvents, setHistoryEvents] = useState<SessionHistoryEvent[]>([]);
 
-  // Tokens on Map
-  const [tokens, setTokens] = useState<MapToken[]>([
-    {
-      id: "tok-arthur",
-      name: "Arthur Cervero",
-      type: "hero",
-      system: "ordem",
-      x: 5,
-      y: 6,
-      size: 1,
-      hp: 48,
-      maxHp: 48,
-      san: 42,
-      maxSan: 55,
-      pe: 28,
-      maxPe: 32,
-      ac: 15,
-      conditions: [],
-      color: "#8b5cf6",
-      avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-    },
-    {
-      id: "tok-valerius",
-      name: "Valerius Ashwood",
-      type: "hero",
-      system: "dnd5e",
-      x: 6,
-      y: 6,
-      size: 1,
-      hp: 36,
-      maxHp: 36,
-      ac: 18,
-      conditions: [],
-      color: "#3b82f6",
-      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    },
-    {
-      id: "tok-aberracao",
-      name: "Zumbi de Sangue",
-      type: "enemy",
-      system: "ordem",
-      x: 10,
-      y: 7,
-      size: 1,
-      hp: 25,
-      maxHp: 25,
-      ac: 13,
-      conditions: [],
-      color: "#ef4444",
-      avatar: "https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=150&auto=format&fit=crop&q=80",
-    },
-    {
-      id: "tok-boss",
-      name: "Degolificada (Boss)",
-      type: "boss",
-      system: "ordem",
-      x: 13,
-      y: 8,
-      size: 2,
-      hp: 140,
-      maxHp: 140,
-      ac: 22,
-      conditions: [],
-      color: "#dc2626",
-      avatar: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=150&auto=format&fit=crop&q=80",
-    },
-  ]);
+  // Tokens on Map (Iniciado Limpo do Zero)
+  const [tokens, setTokens] = useState<MapToken[]>([]);
 
-  // Initiative Combatants
-  const [combatants, setCombatants] = useState<InitiativeCombatant[]>([
-    {
-      id: "tok-arthur",
-      name: "Arthur Cervero",
-      initiative: 22,
-      hp: 48,
-      maxHp: 48,
-      type: "hero",
-      avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-      color: "#8b5cf6",
-    },
-    {
-      id: "tok-valerius",
-      name: "Valerius Ashwood",
-      initiative: 17,
-      hp: 36,
-      maxHp: 36,
-      type: "hero",
-      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-      color: "#3b82f6",
-    },
-    {
-      id: "tok-boss",
-      name: "Degolificada (Boss)",
-      initiative: 15,
-      hp: 140,
-      maxHp: 140,
-      type: "boss",
-      avatar: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=150&auto=format&fit=crop&q=80",
-      color: "#dc2626",
-    },
-    {
-      id: "tok-aberracao",
-      name: "Zumbi de Sangue",
-      initiative: 9,
-      hp: 25,
-      maxHp: 25,
-      type: "enemy",
-      avatar: "https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=150&auto=format&fit=crop&q=80",
-      color: "#ef4444",
-    },
-  ]);
+  // Initiative Combatants (Iniciado Limpo do Zero)
+  const [combatants, setCombatants] = useState<InitiativeCombatant[]>([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [roundNumber, setRoundNumber] = useState(1);
 
@@ -685,31 +447,13 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [userRole, handleUndo, handleRedo]);
 
-  // Characters Data
-  const [dndChar, setDndChar] = useState<DnDCharacter>(defaultDnDChar);
-  const [ordemChar, setOrdemChar] = useState<OrdemCharacter>(defaultOrdemChar);
-  const [customChar, setCustomChar] = useState<CustomCharacter>(defaultCustomChar);
+  // Characters Data (Iniciados Limpos do Zero)
+  const [dndChar, setDndChar] = useState<DnDCharacter>(blankDnDChar);
+  const [ordemChar, setOrdemChar] = useState<OrdemCharacter>(blankOrdemChar);
+  const [customChar, setCustomChar] = useState<CustomCharacter>(blankCustomChar);
 
-  // Chat Messages
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "m-1",
-      sender: "Mestre IA",
-      role: "ai",
-      type: "narration",
-      content:
-        "As portas de carvalho maciço da Mansão se fecham com um estrondo atrás de vocês. O ar fica subitamente gélido, e o cheiro pungente de cinzas e enxofre preenche o salão de espelhos trincados...",
-      timestamp: Date.now() - 60000,
-    },
-    {
-      id: "m-2",
-      sender: "Arthur Cervero",
-      role: "player",
-      type: "in_character",
-      content: "Mantenham a calma e fiquem em guarda. Há uma manifestação de Morte muito forte concentrada no centro da sala.",
-      timestamp: Date.now() - 30000,
-    },
-  ]);
+  // Chat Messages (Iniciado Limpo do Zero)
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const activeTurnCombatant = combatants[currentTurnIndex];
 
@@ -758,6 +502,9 @@ export function App() {
 
   // Send Roll Result to Chat & Timeline
   const handleSendRollToChat = (roll: DiceRollResult) => {
+    // Trigger 3D Dice Animation Overlay
+    setActiveRollingDice(roll);
+
     const newMsg: ChatMessage = {
       id: `roll-msg-${Date.now()}`,
       sender: roll.rollerName || userName,
@@ -788,6 +535,46 @@ export function App() {
         isFumble,
       },
     });
+  };
+
+  // Reset Tabletop Clean from Scratch
+  const handleResetToZero = () => {
+    if (confirm("Tem certeza que deseja limpar tudo e começar a testar do zero?")) {
+      setTokens([]);
+      setCombatants([]);
+      setMessages([]);
+      setHistoryEvents([]);
+      setDndChar(blankDnDChar);
+      setOrdemChar(blankOrdemChar);
+      setCustomChar(blankCustomChar);
+      setMapData({
+        id: "map-1",
+        name: "Mapa Principal",
+        gridWidth: 20,
+        gridHeight: 16,
+        gridSize: 50,
+        bgUrl: "",
+        fogOfWar: false,
+        revealedCells: [],
+        lighting: "bright",
+        pings: [],
+      });
+      setAvailableMaps([
+        {
+          id: "map-1",
+          name: "Mapa Principal",
+          gridWidth: 20,
+          gridHeight: 16,
+          gridSize: 50,
+          bgUrl: "",
+          fogOfWar: false,
+          revealedCells: [],
+          lighting: "bright",
+          pings: [],
+        },
+      ]);
+      rpgAudio.playSpellCast();
+    }
   };
 
   // Select / Switch Room
@@ -1160,6 +947,16 @@ export function App() {
             <span className="hidden xl:inline">Backup</span>
           </button>
 
+          {/* Reset / Clean to Zero */}
+          <button
+            onClick={handleResetToZero}
+            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-red-500/60 text-red-400 hover:text-red-300 transition-all"
+            title="Limpar todos os dados e começar a testar do zero"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden xl:inline">Limpar do Zero</span>
+          </button>
+
           {/* GM Undo & Redo Quick Actions */}
           {userRole === "gm" && (
             <div className="flex items-center gap-1">
@@ -1253,6 +1050,16 @@ export function App() {
           >
             {userRole === "gm" ? <Crown className="w-3.5 h-3.5 text-amber-400" /> : <Shield className="w-3.5 h-3.5 text-blue-400" />}
             <span className="hidden sm:inline">{userRole === "gm" ? "Mestre" : "Jogador"}</span>
+          </button>
+
+          {/* Login / Connect Button */}
+          <button
+            onClick={() => setShowLoginScreen(true)}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 rounded-xl text-xs font-black shadow transition-all active:scale-95"
+            title="Abrir Tela de Login / Selecionar Perfil"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Entrar</span>
           </button>
 
           {/* Chat Toggle Button (Universal for desktop collapsing & mobile opening) */}
@@ -1393,6 +1200,7 @@ export function App() {
               system={system}
               onSendMessage={handleSendMessage}
               onClearChat={() => setMessages([])}
+              onRollClick={(roll) => setActiveRollingDice({ ...roll })}
             />
           </aside>
         )}
@@ -1425,6 +1233,7 @@ export function App() {
                   system={system}
                   onSendMessage={handleSendMessage}
                   onClearChat={() => setMessages([])}
+                  onRollClick={(roll) => setActiveRollingDice({ ...roll })}
                 />
               </div>
             </div>
@@ -1551,6 +1360,7 @@ export function App() {
             undoCount={undoStack.length}
             lastUndoDescription={undoStack.length > 0 ? undoStack[undoStack.length - 1].description : undefined}
             onSaveSnapshot={pushUndoSnapshot}
+            onSendMessage={handleSendMessage}
           />
         </div>
       )}
@@ -1563,15 +1373,7 @@ export function App() {
           tokens={tokens}
           combatants={combatants}
           currentTurnIndex={currentTurnIndex}
-          revealedHandout={{
-            title: "Bilhete Rasgado com Resíduos de Lodo",
-            content:
-              "O tempo aqui dentro não corre como lá fora. Cada tique-taque do relógio do corredor central consome memórias. Se você estiver lendo isso, NÃO olhe nos espelhos com moldura dourada. O Lodo da Morte se alimenta de quem busca seu próprio reflexo...",
-            author: "Dr. Alistair Vance (Desaparecido)",
-            dateOrEra: "14 de Outubro, 2024",
-            imageUrl:
-              "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80",
-          }}
+          revealedHandout={activeRevealedHandout}
           onClose={() => setShowPlayerDisplayModal(false)}
         />
       )}
@@ -1664,6 +1466,38 @@ export function App() {
           <span>{undoNotice.message}</span>
         </div>
       )}
+
+      {/* 3D Rolling Dice Visual Animation Overlay */}
+      <Dice3DAnimationOverlay
+        rollResult={activeRollingDice}
+        onClose={() => setActiveRollingDice(null)}
+        onReplayRoll={(roll) => setActiveRollingDice({ ...roll, timestamp: Date.now() })}
+      />
+
+      {/* Login Screen Modal */}
+      {showLoginScreen && (
+        <LoginScreen
+          currentSystem={system}
+          currentUserRole={userRole}
+          currentUserName={userName}
+          currentRoomCode={roomCode}
+          currentRoomName={roomName}
+          isAlreadyInSession={true}
+          onCancel={() => setShowLoginScreen(false)}
+          onLogin={({ system: newSys, userRole: newRole, userName: newName, roomCode: newCode, roomName: newRoomName }) => {
+            setSystem(newSys);
+            setUserRole(newRole);
+            setUserName(newName);
+            setRoomCode(newCode);
+            setRoomName(newRoomName);
+            setShowLoginScreen(false);
+            rpgAudio.playSpellCast();
+          }}
+        />
+      )}
+
+      {/* Onboarding Modal */}
+      {showOnboarding && <OnboardingModal onClose={() => setShowOnboarding(false)} />}
     </div>
   );
 }

@@ -7,6 +7,7 @@ export const SoundboardPanel: React.FC = () => {
   const [masterVol, setMasterVol] = useState(rpgAudio.masterVolume);
   const [ambientVol, setAmbientVol] = useState(rpgAudio.ambientVolume);
   const [sfxVol, setSfxVol] = useState(rpgAudio.sfxVolume);
+  const [ttsVol, setTtsVol] = useState(rpgAudio.ttsVolume);
   const [isMuted, setIsMuted] = useState(rpgAudio.isMuted);
 
   const [notes, setNotes] = useState<string>(() => {
@@ -41,6 +42,11 @@ export const SoundboardPanel: React.FC = () => {
   const handleSfxVol = (val: number) => {
     setSfxVol(val);
     rpgAudio.setSfxVolume(val);
+  };
+
+  const handleTtsVol = (val: number) => {
+    setTtsVol(val);
+    rpgAudio.setTtsVolume(val);
   };
 
   const handleSaveNotes = (val: string) => {
@@ -90,7 +96,7 @@ export const SoundboardPanel: React.FC = () => {
             <Sliders className="w-3.5 h-3.5" />
             <span>Mixer de Volume por Canais Separados</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-neutral-400 font-semibold">
                 <span>Volume Geral (Master)</span>
@@ -136,6 +142,22 @@ export const SoundboardPanel: React.FC = () => {
                 value={sfxVol}
                 onChange={(e) => handleSfxVol(parseFloat(e.target.value))}
                 className="w-full accent-emerald-500 bg-neutral-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] text-neutral-400 font-semibold">
+                <span>Voz da IA (TTS)</span>
+                <span className="font-mono text-blue-400">{Math.round(ttsVol * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={ttsVol}
+                onChange={(e) => handleTtsVol(parseFloat(e.target.value))}
+                className="w-full accent-blue-500 bg-neutral-800 h-1.5 rounded-lg appearance-none cursor-pointer"
               />
             </div>
           </div>

@@ -112,6 +112,40 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
   const [tokenColor, setTokenColor] = useState(PRESET_AVATARS[0].color);
   const [tokenSize, setTokenSize] = useState<1 | 2>(1);
 
+  // AI Avatar State
+  const [aiAvatarPrompt, setAiAvatarPrompt] = useState("");
+  const [isGeneratingAiAvatar, setIsGeneratingAiAvatar] = useState(false);
+
+  const handleGenerateAiAvatar = async () => {
+    const promptToUse = aiAvatarPrompt.trim() || `${name}, ${classType} ${raceOrOrigin}, ${alignmentOrAffinity}, retrato de personagem épico com iluminação dramática`;
+    setIsGeneratingAiAvatar(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptToUse,
+          type: "character",
+          system,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Falha na geração de avatar");
+      const data = await res.json();
+      if (data.imageUrl) {
+        setAvatarUrl(data.imageUrl);
+      }
+    } catch (err) {
+      console.error("Erro ao gerar avatar com IA:", err);
+      const seed = Math.floor(Math.random() * 1000000);
+      const encoded = encodeURIComponent(`RPG character portrait ${promptToUse}`);
+      const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?width=512&height=512&seed=${seed}&nologo=true`;
+      setAvatarUrl(fallbackUrl);
+    } finally {
+      setIsGeneratingAiAvatar(false);
+    }
+  };
+
   // Computed HP & Defense defaults
   const computedHp =
     system === "ordem"
@@ -609,9 +643,49 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
 
           {step === 3 && (
             <div className="space-y-5 animate-in fade-in duration-150">
+              {/* AI Avatar Generator Block */}
+              <div className="bg-gradient-to-r from-amber-950/40 via-purple-950/30 to-neutral-950 p-4 rounded-2xl border border-amber-500/30 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span>Gerar Avatar de Personagem com Inteligência Artificial</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                    IA Studio
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-400">
+                  Descreva a aparência e estilo do personagem (ex: "Ocultista investigativo com sobretudo preto e marcas arcanas no rosto", "Paladino em armadura dourada reluzente com capa vermelha").
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiAvatarPrompt}
+                    onChange={(e) => setAiAvatarPrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleGenerateAiAvatar();
+                      }
+                    }}
+                    placeholder={`Descreva a aparência de ${name || "seu personagem"}...`}
+                    className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiAvatar}
+                    disabled={isGeneratingAiAvatar}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition-all flex-shrink-0 disabled:opacity-50"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAiAvatar ? "animate-spin" : ""}`} />
+                    <span>{isGeneratingAiAvatar ? "Gerando..." : "Gerar Avatar IA"}</span>
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="text-xs font-bold text-neutral-300 block mb-2">
-                  Escolha um Avatar Pré-definido ou Insira URL
+                  Ou escolha um Avatar Pré-definido ou Insira URL
                 </label>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-3">
                   {PRESET_AVATARS.map((p, idx) => (

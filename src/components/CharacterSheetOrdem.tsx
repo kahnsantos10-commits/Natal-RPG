@@ -35,6 +35,42 @@ export const CharacterSheetOrdem: React.FC<CharacterSheetOrdemProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"stats" | "attacks" | "rituals" | "inventory" | "abilities">("stats");
 
+  // AI Avatar Generator State
+  const [showAiAvatarInput, setShowAiAvatarInput] = useState(false);
+  const [aiAvatarPrompt, setAiAvatarPrompt] = useState("");
+  const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
+
+  const handleGenerateAiAvatar = async () => {
+    const promptToUse = aiAvatarPrompt.trim() || `${character.name}, agente de Ordem Paranormal, ${character.classType}, ${character.elementAffinity || "Morte"} elemento, horror investigativo`;
+    setIsGeneratingAvatar(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptToUse,
+          type: "character",
+          system: "ordem",
+        }),
+      });
+      if (!res.ok) throw new Error("Falha na geração de imagem");
+      const data = await res.json();
+      if (data.imageUrl) {
+        onUpdate({ ...character, avatar: data.imageUrl });
+        setShowAiAvatarInput(false);
+      }
+    } catch (err) {
+      console.error("Erro ao gerar avatar:", err);
+      const seed = Math.floor(Math.random() * 1000000);
+      const encoded = encodeURIComponent(`Ordem Paranormal character portrait ${promptToUse}`);
+      const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?width=512&height=512&seed=${seed}&nologo=true`;
+      onUpdate({ ...character, avatar: fallbackUrl });
+      setShowAiAvatarInput(false);
+    } finally {
+      setIsGeneratingAvatar(false);
+    }
+  };
+
   // Element color map
   const elementColors: Record<string, { border: string; bg: string; text: string }> = {
     Sangue: { border: "border-red-600", bg: "bg-red-950/60", text: "text-red-400" },
@@ -162,17 +198,65 @@ export const CharacterSheetOrdem: React.FC<CharacterSheetOrdemProps> = ({
         </div>
 
         <div className="flex flex-col md:flex-row items-center gap-6 relative z-10">
-          <div className="relative">
-            <div className="w-28 h-28 rounded-2xl overflow-hidden border-2 border-purple-500/60 shadow-xl">
+          <div className="relative group">
+            <div className="w-28 h-28 rounded-2xl overflow-hidden border-2 border-purple-500/60 shadow-xl relative">
               <img
                 src={character.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80"}
                 alt={character.name}
                 className="w-full h-full object-cover"
               />
+              <button
+                onClick={() => setShowAiAvatarInput(!showAiAvatarInput)}
+                className="absolute inset-x-0 bottom-0 py-1 bg-purple-600/90 hover:bg-purple-500 text-white font-bold text-[10px] flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                title="Gerar Avatar com IA"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>Gerar IA</span>
+              </button>
             </div>
             <span className="absolute -bottom-2 -right-2 px-2.5 py-0.5 bg-purple-900 border border-purple-500 rounded-full text-[10px] font-bold text-purple-200 shadow">
               {character.nex}% NEX
             </span>
+
+            {showAiAvatarInput && (
+              <div className="absolute top-full left-0 mt-2 z-30 w-64 p-3 bg-neutral-900 border border-purple-500/50 rounded-2xl shadow-2xl space-y-2 animate-in fade-in duration-150">
+                <span className="text-[10px] font-bold text-purple-300 block flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  <span>Descreva a Aparência para o Avatar IA</span>
+                </span>
+                <input
+                  type="text"
+                  value={aiAvatarPrompt}
+                  onChange={(e) => setAiAvatarPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleGenerateAiAvatar();
+                    }
+                  }}
+                  placeholder={`${character.name}, ${character.classType}...`}
+                  className="w-full bg-neutral-950 border border-neutral-800 focus:border-purple-500 rounded-xl px-2.5 py-1.5 text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+                />
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowAiAvatarInput(false)}
+                    className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-[10px] font-bold"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiAvatar}
+                    disabled={isGeneratingAvatar}
+                    className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shadow disabled:opacity-50"
+                  >
+                    <Sparkles className={`w-3 h-3 ${isGeneratingAvatar ? "animate-spin" : ""}`} />
+                    <span>{isGeneratingAvatar ? "Gerando..." : "Gerar"}</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4 w-full">

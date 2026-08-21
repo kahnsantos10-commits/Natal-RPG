@@ -132,6 +132,49 @@ export function MapManagerModal({
   );
   const [fogOfWar, setFogOfWar] = useState(false);
 
+  // AI Map Generation State
+  const [aiMapPrompt, setAiMapPrompt] = useState("");
+  const [isGeneratingAiMap, setIsGeneratingAiMap] = useState(false);
+
+  const handleGenerateAiMap = async () => {
+    if (!aiMapPrompt.trim()) {
+      alert("Por favor, digite uma descrição para o ambiente do mapa.");
+      return;
+    }
+
+    setIsGeneratingAiMap(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: aiMapPrompt,
+          type: "map",
+          system,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Falha na geração de imagem de mapa.");
+      const data = await res.json();
+      if (data.imageUrl) {
+        setBgUrl(data.imageUrl);
+        if (!mapName) {
+          const shortTitle = aiMapPrompt.length > 30 ? aiMapPrompt.slice(0, 30) + "..." : aiMapPrompt;
+          setMapName(shortTitle);
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao gerar mapa com IA:", err);
+      const seed = Math.floor(Math.random() * 1000000);
+      const encoded = encodeURIComponent(`RPG battlemap top-down view ${aiMapPrompt}`);
+      const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&seed=${seed}&nologo=true`;
+      setBgUrl(fallbackUrl);
+      if (!mapName) setMapName(aiMapPrompt.slice(0, 30));
+    } finally {
+      setIsGeneratingAiMap(false);
+    }
+  };
+
   // File Upload Handler (Data URL)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -417,6 +460,46 @@ export function MapManagerModal({
                     onChange={(e) => setGridSize(Number(e.target.value))}
                     className="w-full bg-neutral-950 border border-neutral-800 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-neutral-100 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {/* AI Map Generator Block */}
+              <div className="bg-gradient-to-r from-amber-950/40 via-purple-950/30 to-neutral-950 p-4 rounded-2xl border border-amber-500/30 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span>Gerar Fundo de Mapa com Inteligência Artificial</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                    IA Mestre Studio
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-400">
+                  Descreva o ambiente e o cenário desejado (ex: "Masmorra antiga de pedra com tochas e rio de lava no centro", "Laboratório ocultista com computadores velhos e luzes roxas").
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiMapPrompt}
+                    onChange={(e) => setAiMapPrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleGenerateAiMap();
+                      }
+                    }}
+                    placeholder="Descreva o ambiente do novo mapa em detalhes..."
+                    className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiMap}
+                    disabled={isGeneratingAiMap}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 transition-all flex-shrink-0 disabled:opacity-50"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAiMap ? "animate-spin" : ""}`} />
+                    <span>{isGeneratingAiMap ? "Gerando..." : "Gerar Mapa IA"}</span>
+                  </button>
                 </div>
               </div>
 

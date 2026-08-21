@@ -13,6 +13,7 @@ class RPGAudioEngine {
   public masterVolume: number = 0.8;
   public ambientVolume: number = 0.6;
   public sfxVolume: number = 0.85;
+  public ttsVolume: number = 1.0;
 
   private getContext(): AudioContext {
     if (!this.ctx) {
@@ -64,6 +65,10 @@ class RPGAudioEngine {
     if (this.sfxGain && this.ctx) {
       this.sfxGain.gain.setValueAtTime(this.sfxVolume, this.ctx.currentTime);
     }
+  }
+
+  public setTtsVolume(val: number) {
+    this.ttsVolume = Math.max(0, Math.min(1, val));
   }
 
   // Play realistic dice rolling rattle and clatter

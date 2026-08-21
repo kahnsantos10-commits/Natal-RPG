@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ChatMessage, RPGSystem, UserRole } from "../types";
+import { ChatMessage, DiceRollResult, RPGSystem, UserRole } from "../types";
 import {
   Send,
   Sparkles,
@@ -11,7 +11,8 @@ import {
   MessageSquare,
   Zap,
   Eye,
-  Heart
+  Heart,
+  Play
 } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
 
@@ -22,6 +23,7 @@ interface ChatPanelProps {
   system: RPGSystem;
   onSendMessage: (text: string, type?: ChatMessage["type"]) => void;
   onClearChat?: () => void;
+  onRollClick?: (roll: DiceRollResult) => void;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -31,6 +33,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   system,
   onSendMessage,
   onClearChat,
+  onRollClick,
 }) => {
   const [inputText, setInputText] = useState("");
   const [messageType, setMessageType] = useState<ChatMessage["type"]>("in_character");
@@ -94,9 +97,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     <Dice5 className="w-3.5 h-3.5 text-amber-500" />
                     {msg.sender}
                   </span>
-                  <span className="font-mono text-[10px] text-neutral-500">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {onRollClick && (
+                      <button
+                        onClick={() => onRollClick(roll)}
+                        className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all"
+                        title="Ver Animação 3D do Dado"
+                      >
+                        <Play className="w-2.5 h-2.5 fill-amber-300" />
+                        Animação 3D
+                      </button>
+                    )}
+                    <span className="font-mono text-[10px] text-neutral-500">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="text-xs font-semibold text-neutral-200 mb-2">{roll.reason}</div>

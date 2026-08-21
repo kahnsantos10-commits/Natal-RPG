@@ -41,6 +41,8 @@ export interface InitiativeCombatant {
   avatar?: string;
   color?: string;
   conditions?: string[];
+  reactionHeld?: boolean;
+  reactionTrigger?: string;
 }
 
 export interface MapToken {

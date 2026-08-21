@@ -949,6 +949,49 @@ Retorne um JSON estrito no formato:
   });
 });
 
+// 7. AI Image Generation Endpoint (For Maps and Characters)
+app.post("/api/ai/generate-image", async (req: Request, res: Response) => {
+  const { prompt, type = "map", system = "dnd5e" } = req.body;
+
+  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+    return res.status(400).json({ error: "Descrição/prompt é obrigatório." });
+  }
+
+  const cleanPrompt = prompt.trim();
+  const seed = Math.floor(Math.random() * 1000000);
+
+  let finalPrompt = "";
+  let width = 1280;
+  let height = 720;
+
+  if (type === "map") {
+    width = 1280;
+    height = 720;
+    const stylePrefix = system === "ordem"
+      ? "Dark investigative mystery RPG battlemap, top-down 2D orthographic overhead view, detailed texture, dark tactical map"
+      : "High fantasy D&D RPG battlemap, top-down 2D orthographic overhead view, 8k resolution detailed textures, tactical VTT map";
+    finalPrompt = `${stylePrefix}, ${cleanPrompt}, no characters, no tokens, no 3d isometric angle, seamless tactical map`;
+  } else {
+    // character
+    width = 512;
+    height = 512;
+    const charStyle = system === "ordem"
+      ? "Ordem Paranormal horror mystery character portrait, cinematic lighting, epic artwork, highly detailed digital painting"
+      : "D&D fantasy RPG character portrait avatar, detailed digital painting, heroic cinematic lighting, epic character art";
+    finalPrompt = `${charStyle}, ${cleanPrompt}, centered portrait, high quality artwork`;
+  }
+
+  const encodedPrompt = encodeURIComponent(finalPrompt);
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+
+  res.json({
+    imageUrl,
+    prompt: finalPrompt,
+    seed,
+    type,
+  });
+});
+
 // Setup Vite middleware for development or static serving for production
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
