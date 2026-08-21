@@ -21,7 +21,17 @@ import {
   Compass,
   Move,
   Layers,
-  Box
+  Box,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Crosshair,
+  Footprints,
+  Target,
+  Users,
+  Check,
+  Navigation
 } from "lucide-react";
 import { Token3DModal } from "./Token3DModal";
 import { rpgAudio } from "../utils/audioSynth";
@@ -35,6 +45,11 @@ interface BattleMapProps {
   onUpdateTokens: (tokens: MapToken[]) => void;
   onUpdateMap: (map: Partial<MapData>) => void;
   onSelectTokenForRoll?: (token: MapToken) => void;
+  onUndo?: () => void;
+  canUndo?: boolean;
+  undoCount?: number;
+  lastUndoDescription?: string;
+  onSaveSnapshot?: (description: string) => void;
 }
 
 export const BattleMap: React.FC<BattleMapProps> = ({
@@ -46,6 +61,11 @@ export const BattleMap: React.FC<BattleMapProps> = ({
   onUpdateTokens,
   onUpdateMap,
   onSelectTokenForRoll,
+  onUndo,
+  canUndo,
+  undoCount,
+  lastUndoDescription,
+  onSaveSnapshot,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -53,13 +73,25 @@ export const BattleMap: React.FC<BattleMapProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
-  const [activeTool, setActiveTool] = useState<"select" | "measure" | "fog_reveal" | "fog_hide" | "ping" | "draw">("select");
+  const [activeTool, setActiveTool] = useState<"select" | "measure" | "fog_reveal" | "fog_hide" | "ping" | "draw" | "move_token">("select");
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [inspected3DToken, setInspected3DToken] = useState<MapToken | null>(null);
 
-  // Dragging tokens
+  // Dragging tokens & movement tracking
   const [draggingTokenId, setDraggingTokenId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dragStartCell, setDragStartCell] = useState<{ x: number; y: number } | null>(null);
+  const [dragCurrentCell, setDragCurrentCell] = useState<{ x: number; y: number } | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<{ x: number; y: number } | null>(null);
+  const [isClickToMoveActive, setIsClickToMoveActive] = useState(false);
+  const [recentMoveCell, setRecentMoveCell] = useState<{ x: number; y: number; time: number } | null>(null);
+
+  // Grid Right-Click Context Menu
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    gridX: number;
+    gridY: number;
+  } | null>(null);
 
   // Measurement tool state
   const [measureStart, setMeasureStart] = useState<{ x: number; y: number } | null>(null);
@@ -67,6 +99,7 @@ export const BattleMap: React.FC<BattleMapProps> = ({
 
   // Add Token Modal
   const [showAddTokenModal, setShowAddTokenModal] = useState(false);
+  const [addTokenCoords, setAddTokenCoords] = useState<{ x: number; y: number } | null>(null);
   const [newTokenName, setNewTokenName] = useState("");
   const [newTokenType, setNewTokenType] = useState<"hero" | "enemy" | "npc" | "boss">("enemy");
   const [newTokenHp, setNewTokenHp] = useState(30);
@@ -183,18 +216,18 @@ export const BattleMap: React.FC<BattleMapProps> = ({
 
       setZoom((prevZoom) => {
         const newZoom = Math.min(3.5, Math.max(0.3, Number((prevZoom * zoomFactor).toFixed(3))));
-        if (newZoom === prevZoom) return prevZoom;
-
-        setPan((prevPan) => {
-          const mapPointX = (mouseX - prevPan.x) / prevZoom;
-          const mapPointY = (mouseY - prevPan.y) / prevZoom;
-          return {
-            x: mouseX - mapPointX * newZoom,
-            y: mouseY - mapPointY * newZoom,
-          };
-        });
-
         return newZoom;
+      });
+
+      setPan((prevPan) => {
+        const currentZoom = zoom;
+        const newZoom = Math.min(3.5, Math.max(0.3, Number((currentZoom * zoomFactor).toFixed(3))));
+        const mapPointX = (mouseX - prevPan.x) / currentZoom;
+        const mapPointY = (mouseY - prevPan.y) / currentZoom;
+        return {
+          x: mouseX - mapPointX * newZoom,
+          y: mouseY - mapPointY * newZoom,
+        };
       });
     };
 
@@ -204,10 +237,112 @@ export const BattleMap: React.FC<BattleMapProps> = ({
     };
   }, [map.gridWidth, map.gridHeight, gridSize]);
 
-  // Keyboard navigation (+, -, 0, Space)
+  // Movement helper functions
+  const handleMoveTokenTo = (tokenId: string, targetX: number, targetY: number) => {
+    const clampedX = Math.max(0, Math.min(map.gridWidth - 1, targetX));
+    const clampedY = Math.max(0, Math.min(map.gridHeight - 1, targetY));
+
+    const tok = tokens.find((t) => t.id === tokenId);
+    if (tok && onSaveSnapshot) {
+      onSaveSnapshot(`Mover ${tok.name} para (${clampedX},${clampedY})`);
+    }
+
+    onUpdateTokens(
+      tokens.map((t) => (t.id === tokenId ? { ...t, x: clampedX, y: clampedY } : t))
+    );
+    setRecentMoveCell({ x: clampedX, y: clampedY, time: Date.now() });
+    rpgAudio.playTokenMove();
+  };
+
+  const handleNudgeToken = (tokenId: string, dx: number, dy: number) => {
+    const target = tokens.find((t) => t.id === tokenId);
+    if (!target) return;
+
+    const newX = Math.max(0, Math.min(map.gridWidth - 1, target.x + dx));
+    const newY = Math.max(0, Math.min(map.gridHeight - 1, target.y + dy));
+
+    if (newX !== target.x || newY !== target.y) {
+      if (onSaveSnapshot) {
+        onSaveSnapshot(`Mover ${target.name}`);
+      }
+      onUpdateTokens(
+        tokens.map((t) => (t.id === tokenId ? { ...t, x: newX, y: newY } : t))
+      );
+      setRecentMoveCell({ x: newX, y: newY, time: Date.now() });
+      rpgAudio.playFootstep();
+    }
+  };
+
+  const handleCenterToken = (tokenId: string) => {
+    const centerX = Math.floor(map.gridWidth / 2);
+    const centerY = Math.floor(map.gridHeight / 2);
+    handleMoveTokenTo(tokenId, centerX, centerY);
+  };
+
+  const handleRegroupHeroesAt = (targetX: number, targetY: number) => {
+    const heroes = tokens.filter((t) => t.type === "hero" || t.type === "npc");
+    if (heroes.length === 0) return;
+
+    if (onSaveSnapshot) {
+      onSaveSnapshot("Reagrupar Heróis no Mapa");
+    }
+
+    let placed = 0;
+    const offsets = [
+      [0, 0], [1, 0], [0, 1], [-1, 0], [0, -1],
+      [1, 1], [-1, 1], [1, -1], [-1, -1], [2, 0], [0, 2]
+    ];
+
+    onUpdateTokens(
+      tokens.map((t) => {
+        if (t.type === "hero" || t.type === "npc") {
+          const offset = offsets[placed % offsets.length] || [0, 0];
+          placed++;
+          const nx = Math.max(0, Math.min(map.gridWidth - 1, targetX + offset[0]));
+          const ny = Math.max(0, Math.min(map.gridHeight - 1, targetY + offset[1]));
+          return { ...t, x: nx, y: ny };
+        }
+        return t;
+      })
+    );
+    rpgAudio.playMagicSpell();
+    setRecentMoveCell({ x: targetX, y: targetY, time: Date.now() });
+  };
+
+  // Keyboard navigation (+, -, 0, Space, Arrow Keys, WASD for token movement)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName)) return;
+
+      // Token movement with Arrow keys & WASD
+      if (selectedTokenId) {
+        if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+          e.preventDefault();
+          handleNudgeToken(selectedTokenId, 0, -1);
+          return;
+        }
+        if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+          e.preventDefault();
+          handleNudgeToken(selectedTokenId, 0, 1);
+          return;
+        }
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
+          e.preventDefault();
+          handleNudgeToken(selectedTokenId, -1, 0);
+          return;
+        }
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
+          e.preventDefault();
+          handleNudgeToken(selectedTokenId, 1, 0);
+          return;
+        }
+        if (e.key === "Escape") {
+          setSelectedTokenId(null);
+          setIsClickToMoveActive(false);
+          setContextMenu(null);
+          return;
+        }
+      }
 
       if (e.key === "+" || e.key === "=") {
         e.preventDefault();
@@ -235,7 +370,7 @@ export const BattleMap: React.FC<BattleMapProps> = ({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [isSpacePressed]);
+  }, [isSpacePressed, selectedTokenId, tokens, map.gridWidth, map.gridHeight]);
 
   // Touch pinch-to-zoom & two-finger pan
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -248,7 +383,7 @@ export const BattleMap: React.FC<BattleMapProps> = ({
         y: (t1.clientY + t2.clientY) / 2,
       };
       touchStartRef.current = { dist, zoom, center, pan };
-    } else if (e.touches.length === 1 && (activeTool === "select" || isSpacePressed)) {
+    } else if (e.touches.length === 1 && !draggingTokenId && (activeTool === "select" || isSpacePressed)) {
       const t = e.touches[0];
       setIsPanning(true);
       setPanStart({ x: t.clientX, y: t.clientY });
@@ -279,6 +414,19 @@ export const BattleMap: React.FC<BattleMapProps> = ({
         x: mouseX - mapPointX * newZoom,
         y: mouseY - mapPointY * newZoom,
       });
+    } else if (draggingTokenId && containerRef.current && e.touches.length === 1) {
+      const t = e.touches[0];
+      const container = containerRef.current.getBoundingClientRect();
+      const rawX = (t.clientX - container.left - pan.x) / zoom;
+      const rawY = (t.clientY - container.top - pan.y) / zoom;
+
+      const gridX = Math.max(0, Math.min(map.gridWidth - 1, Math.floor(rawX / gridSize)));
+      const gridY = Math.max(0, Math.min(map.gridHeight - 1, Math.floor(rawY / gridSize)));
+
+      setDragCurrentCell({ x: gridX, y: gridY });
+      onUpdateTokens(
+        tokens.map((tok) => (tok.id === draggingTokenId ? { ...tok, x: gridX, y: gridY } : tok))
+      );
     } else if (e.touches.length === 1 && isPanning) {
       const t = e.touches[0];
       setPan((prev) => ({
@@ -292,6 +440,12 @@ export const BattleMap: React.FC<BattleMapProps> = ({
   const handleTouchEnd = () => {
     touchStartRef.current = null;
     setIsPanning(false);
+    if (draggingTokenId) {
+      rpgAudio.playTokenMove();
+      setDraggingTokenId(null);
+      setDragStartCell(null);
+      setDragCurrentCell(null);
+    }
   };
 
   // Background map presets
@@ -318,23 +472,42 @@ export const BattleMap: React.FC<BattleMapProps> = ({
     }
   ];
 
-  // Handle Token Position Dragging
+  // Handle Token Mouse Down (starts drag)
   const handleTokenMouseDown = (e: React.MouseEvent, token: MapToken) => {
-    if (activeTool !== "select") return;
     e.stopPropagation();
+    if (onSaveSnapshot) {
+      onSaveSnapshot(`Arrastar ${token.name}`);
+    }
     setSelectedTokenId(token.id);
     setDraggingTokenId(token.id);
+    setDragStartCell({ x: token.x, y: token.y });
+    setDragCurrentCell({ x: token.x, y: token.y });
+    if (contextMenu) setContextMenu(null);
+  };
 
-    const container = containerRef.current?.getBoundingClientRect();
-    if (!container) return;
-
-    setDragOffset({
-      x: e.clientX,
-      y: e.clientY,
-    });
+  // Handle Token Touch Start (starts drag on tablet / phone)
+  const handleTokenTouchStart = (e: React.TouchEvent, token: MapToken) => {
+    e.stopPropagation();
+    if (onSaveSnapshot) {
+      onSaveSnapshot(`Arrastar ${token.name}`);
+    }
+    setSelectedTokenId(token.id);
+    setDraggingTokenId(token.id);
+    setDragStartCell({ x: token.x, y: token.y });
+    setDragCurrentCell({ x: token.x, y: token.y });
+    if (contextMenu) setContextMenu(null);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (!containerRef.current) return;
+    const container = containerRef.current.getBoundingClientRect();
+    const rawX = (e.clientX - container.left - pan.x) / zoom;
+    const rawY = (e.clientY - container.top - pan.y) / zoom;
+    const gridX = Math.max(0, Math.min(map.gridWidth - 1, Math.floor(rawX / gridSize)));
+    const gridY = Math.max(0, Math.min(map.gridHeight - 1, Math.floor(rawY / gridSize)));
+
+    setHoveredCell({ x: gridX, y: gridY });
+
     // 1. Panning the Map
     if (isPanning) {
       setPan((prev) => ({
@@ -347,26 +520,13 @@ export const BattleMap: React.FC<BattleMapProps> = ({
 
     // 2. Measuring
     if (activeTool === "measure" && measureStart) {
-      const container = containerRef.current?.getBoundingClientRect();
-      if (!container) return;
-      const relativeX = (e.clientX - container.left - pan.x) / zoom;
-      const relativeY = (e.clientY - container.top - pan.y) / zoom;
-      setMeasureCurrent({
-        x: Math.floor(relativeX / gridSize),
-        y: Math.floor(relativeY / gridSize),
-      });
+      setMeasureCurrent({ x: gridX, y: gridY });
       return;
     }
 
     // 3. Dragging Token
-    if (draggingTokenId && containerRef.current) {
-      const container = containerRef.current.getBoundingClientRect();
-      const rawX = (e.clientX - container.left - pan.x) / zoom;
-      const rawY = (e.clientY - container.top - pan.y) / zoom;
-
-      const gridX = Math.max(0, Math.min(map.gridWidth - 1, Math.floor(rawX / gridSize)));
-      const gridY = Math.max(0, Math.min(map.gridHeight - 1, Math.floor(rawY / gridSize)));
-
+    if (draggingTokenId) {
+      setDragCurrentCell({ x: gridX, y: gridY });
       onUpdateTokens(
         tokens.map((t) => (t.id === draggingTokenId ? { ...t, x: gridX, y: gridY } : t))
       );
@@ -375,8 +535,10 @@ export const BattleMap: React.FC<BattleMapProps> = ({
 
   const handleMouseUp = () => {
     if (draggingTokenId) {
-      rpgAudio.playSwordHit();
+      rpgAudio.playTokenMove();
       setDraggingTokenId(null);
+      setDragStartCell(null);
+      setDragCurrentCell(null);
     }
     if (isPanning) setIsPanning(false);
     if (activeTool === "measure" && measureStart) {
@@ -386,6 +548,15 @@ export const BattleMap: React.FC<BattleMapProps> = ({
   };
 
   const handleCellClick = (x: number, y: number) => {
+    if (contextMenu) setContextMenu(null);
+
+    // If Click-To-Move or in Move Mode and token selected, move token here!
+    if ((isClickToMoveActive || activeTool === "move_token" || (activeTool === "select" && selectedTokenId)) && selectedTokenId) {
+      handleMoveTokenTo(selectedTokenId, x, y);
+      setIsClickToMoveActive(false);
+      return;
+    }
+
     if (activeTool === "fog_reveal") {
       const cellKey = `${x},${y}`;
       if (!map.revealedCells.includes(cellKey)) {
@@ -418,6 +589,17 @@ export const BattleMap: React.FC<BattleMapProps> = ({
     }
   };
 
+  // Right-click context menu on grid
+  const handleContextMenu = (e: React.MouseEvent, x: number, y: number) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      gridX: x,
+      gridY: y,
+    });
+  };
+
   const handleAddToken = () => {
     if (!newTokenName.trim()) return;
 
@@ -428,13 +610,16 @@ export const BattleMap: React.FC<BattleMapProps> = ({
       npc: "#10b981",
     };
 
+    const spawnX = addTokenCoords ? addTokenCoords.x : Math.floor(map.gridWidth / 2);
+    const spawnY = addTokenCoords ? addTokenCoords.y : Math.floor(map.gridHeight / 2);
+
     const createdToken: MapToken = {
       id: `tok-${Date.now()}`,
       name: newTokenName,
       type: newTokenType,
       system,
-      x: Math.floor(map.gridWidth / 2),
-      y: Math.floor(map.gridHeight / 2),
+      x: spawnX,
+      y: spawnY,
       size: newTokenType === "boss" ? 2 : 1,
       hp: newTokenHp,
       maxHp: newTokenHp,
@@ -454,12 +639,22 @@ export const BattleMap: React.FC<BattleMapProps> = ({
           : "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=150&auto=format&fit=crop&q=80"),
     };
 
+    if (onSaveSnapshot) {
+      onSaveSnapshot(`Adicionar Token ${newTokenName}`);
+    }
+
     onUpdateTokens([...tokens, createdToken]);
     setNewTokenName("");
+    setAddTokenCoords(null);
     setShowAddTokenModal(false);
   };
 
   const handleDamageHeal = (tokenId: string, delta: number) => {
+    const tok = tokens.find((t) => t.id === tokenId);
+    if (tok && onSaveSnapshot) {
+      onSaveSnapshot(`Alterar HP de ${tok.name} (${delta > 0 ? "+" : ""}${delta})`);
+    }
+
     onUpdateTokens(
       tokens.map((t) => {
         if (t.id === tokenId) {
@@ -472,6 +667,11 @@ export const BattleMap: React.FC<BattleMapProps> = ({
   };
 
   const handleToggleCondition = (tokenId: string, cond: string) => {
+    const tok = tokens.find((t) => t.id === tokenId);
+    if (tok && onSaveSnapshot) {
+      onSaveSnapshot(`Condição "${cond}" em ${tok.name}`);
+    }
+
     onUpdateTokens(
       tokens.map((t) => {
         if (t.id === tokenId) {
@@ -487,6 +687,11 @@ export const BattleMap: React.FC<BattleMapProps> = ({
   };
 
   const handleDeleteToken = (tokenId: string) => {
+    const tok = tokens.find((t) => t.id === tokenId);
+    if (tok && onSaveSnapshot) {
+      onSaveSnapshot(`Remover Token ${tok.name}`);
+    }
+
     onUpdateTokens(tokens.filter((t) => t.id !== tokenId));
     if (selectedTokenId === tokenId) setSelectedTokenId(null);
   };
@@ -573,6 +778,34 @@ export const BattleMap: React.FC<BattleMapProps> = ({
             )}
 
             <div className="w-px h-5 bg-neutral-800 mx-0.5 sm:mx-1 flex-shrink-0" />
+
+            {userRole === "gm" && onUndo && (
+              <>
+                <div className="w-px h-5 bg-neutral-800 mx-0.5 sm:mx-1 flex-shrink-0" />
+                <button
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all flex-shrink-0 ${
+                    canUndo
+                      ? "bg-amber-950/80 border-amber-600/80 text-amber-300 hover:bg-amber-900 shadow-md"
+                      : "bg-neutral-900 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
+                  }`}
+                  title={
+                    canUndo
+                      ? `Desfazer ação no mapa: ${lastUndoDescription || "Desfazer"} [Ctrl+Z]`
+                      : "Nenhuma ação recente no mapa para desfazer"
+                  }
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Desfazer</span>
+                  {canUndo && undoCount && undoCount > 0 ? (
+                    <span className="px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[10px] font-mono">
+                      {undoCount}
+                    </span>
+                  ) : null}
+                </button>
+              </>
+            )}
 
             <button
               onClick={() => setShowAddTokenModal(true)}
@@ -719,7 +952,7 @@ export const BattleMap: React.FC<BattleMapProps> = ({
             }}
           />
 
-          {/* Grid Cells (for clicking / fog of war / pinging) */}
+          {/* Grid Cells (for clicking / fog of war / pinging / right-click context menu) */}
           <div
             className="absolute inset-0 grid"
             style={{
@@ -731,26 +964,100 @@ export const BattleMap: React.FC<BattleMapProps> = ({
               Array.from({ length: map.gridWidth }).map((_, x) => {
                 const cellKey = `${x},${y}`;
                 const isRevealed = !map.fogOfWar || map.revealedCells.includes(cellKey);
+                const isHovered = hoveredCell?.x === x && hoveredCell?.y === y;
+                const isRecentMove = recentMoveCell?.x === x && recentMoveCell?.y === y && Date.now() - recentMoveCell.time < 1500;
 
                 return (
                   <div
                     key={cellKey}
                     onClick={() => handleCellClick(x, y)}
+                    onContextMenu={(e) => handleContextMenu(e, x, y)}
                     className={`relative border border-white/5 transition-colors ${
                       !isRevealed
                         ? "bg-black/95 backdrop-blur-sm z-10"
+                        : isClickToMoveActive && isHovered
+                        ? "bg-amber-500/25 border-amber-400 cursor-crosshair"
                         : "hover:bg-amber-500/10 cursor-pointer"
                     }`}
                   >
-                    {/* Measurement Line Overlay */}
-                    {measureStart && measureCurrent && (
-                      <span className="sr-only">Régua ativa</span>
+                    {/* Reticle hint when click-to-move is active */}
+                    {isClickToMoveActive && isHovered && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-amber-300">
+                        <Crosshair className="w-5 h-5 animate-pulse" />
+                      </div>
+                    )}
+
+                    {/* Arrival Pulse */}
+                    {isRecentMove && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <span className="w-full h-full rounded-full bg-amber-400/30 animate-ping" />
+                      </div>
                     )}
                   </div>
                 );
               })
             )}
           </div>
+
+          {/* Movement Trajectory Vector (When Dragging Token or in Click-to-Move Hover) */}
+          {((draggingTokenId && dragStartCell && dragCurrentCell) || (isClickToMoveActive && selectedToken && hoveredCell)) && (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none z-25">
+              {(() => {
+                const startX = (draggingTokenId ? dragStartCell?.x ?? selectedToken?.x ?? 0 : selectedToken?.x ?? 0) * gridSize + gridSize / 2;
+                const startY = (draggingTokenId ? dragStartCell?.y ?? selectedToken?.y ?? 0 : selectedToken?.y ?? 0) * gridSize + gridSize / 2;
+                const targetX = (draggingTokenId ? dragCurrentCell?.x ?? 0 : hoveredCell?.x ?? 0) * gridSize + gridSize / 2;
+                const targetY = (draggingTokenId ? dragCurrentCell?.y ?? 0 : hoveredCell?.y ?? 0) * gridSize + gridSize / 2;
+
+                const originCellX = draggingTokenId ? dragStartCell?.x ?? 0 : selectedToken?.x ?? 0;
+                const originCellY = draggingTokenId ? dragStartCell?.y ?? 0 : selectedToken?.y ?? 0;
+                const destCellX = draggingTokenId ? dragCurrentCell?.x ?? 0 : hoveredCell?.x ?? 0;
+                const destCellY = draggingTokenId ? dragCurrentCell?.y ?? 0 : hoveredCell?.y ?? 0;
+
+                const dx = destCellX - originCellX;
+                const dy = destCellY - originCellY;
+                const distQuads = Math.round(Math.hypot(dx, dy));
+                const distMeters = (distQuads * 1.5).toFixed(1);
+
+                return (
+                  <>
+                    <line
+                      x1={startX}
+                      y1={startY}
+                      x2={targetX}
+                      y2={targetY}
+                      stroke="#38bdf8"
+                      strokeWidth="3"
+                      strokeDasharray="6 4"
+                    />
+                    <circle cx={targetX} cy={targetY} r="8" fill="#38bdf8" fillOpacity="0.4" stroke="#0284c7" strokeWidth="2" />
+                    <g transform={`translate(${(startX + targetX) / 2}, ${(startY + targetY) / 2 - 12})`}>
+                      <rect
+                        x="-50"
+                        y="-12"
+                        width="100"
+                        height="20"
+                        rx="5"
+                        fill="#09090b"
+                        fillOpacity="0.9"
+                        stroke="#38bdf8"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x="0"
+                        y="2"
+                        fill="#7dd3fc"
+                        fontSize="10"
+                        fontWeight="bold"
+                        textAnchor="middle"
+                      >
+                        {distQuads} quads ({distMeters}m)
+                      </text>
+                    </g>
+                  </>
+                );
+              })()}
+            </svg>
+          )}
 
           {/* Measurement Distance Line */}
           {measureStart && measureCurrent && (
@@ -832,11 +1139,14 @@ export const BattleMap: React.FC<BattleMapProps> = ({
               <div
                 key={token.id}
                 onMouseDown={(e) => handleTokenMouseDown(e, token)}
+                onTouchStart={(e) => handleTokenTouchStart(e, token)}
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedTokenId(token.id);
                 }}
-                className={`absolute z-20 cursor-grab active:cursor-grabbing transition-transform flex flex-col items-center justify-center group`}
+                className={`absolute z-20 cursor-grab active:cursor-grabbing transition-all duration-75 flex flex-col items-center justify-center group ${
+                  draggingTokenId === token.id ? "scale-110 opacity-90 z-30" : ""
+                }`}
                 style={{
                   left: token.x * gridSize,
                   top: token.y * gridSize,
@@ -864,7 +1174,7 @@ export const BattleMap: React.FC<BattleMapProps> = ({
                     isTurnActive
                       ? "ring-4 ring-amber-400 ring-offset-2 ring-offset-neutral-950 scale-105"
                       : isSelected
-                      ? "ring-2 ring-blue-400 ring-offset-1 ring-offset-neutral-950"
+                      ? "ring-3 ring-cyan-400 ring-offset-1 ring-offset-neutral-950"
                       : "hover:scale-105"
                   }`}
                   style={{ borderColor: token.color || "#eab308" }}
@@ -914,24 +1224,100 @@ export const BattleMap: React.FC<BattleMapProps> = ({
         </div>
       </div>
 
+      {/* Grid Right-Click Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 rounded-xl shadow-2xl p-1.5 min-w-[200px] text-xs animate-in fade-in zoom-in-95"
+          style={{ left: Math.min(window.innerWidth - 220, contextMenu.x), top: Math.min(window.innerHeight - 200, contextMenu.y) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 py-1 text-[10px] uppercase font-bold text-neutral-400 border-b border-neutral-800 flex items-center justify-between">
+            <span>Posição ({contextMenu.gridX}, {contextMenu.gridY})</span>
+            <button onClick={() => setContextMenu(null)} className="text-neutral-500 hover:text-white">✕</button>
+          </div>
+
+          <div className="py-1 space-y-0.5">
+            {selectedToken && (
+              <button
+                onClick={() => {
+                  handleMoveTokenTo(selectedToken.id, contextMenu.gridX, contextMenu.gridY);
+                  setContextMenu(null);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-cyan-300 hover:text-cyan-200 flex items-center gap-2 font-medium"
+              >
+                <Footprints className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Mover "{selectedToken.name}" aqui</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                const newPing = {
+                  id: `ping-${Date.now()}`,
+                  x: contextMenu.gridX,
+                  y: contextMenu.gridY,
+                  color: "#f59e0b",
+                  sender: userRole === "gm" ? "Mestre" : "Jogador",
+                  timestamp: Date.now(),
+                };
+                onUpdateMap({ pings: [...(map.pings || []), newPing] });
+                rpgAudio.playMagicSpell();
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-neutral-200 hover:text-amber-300 flex items-center gap-2"
+            >
+              <MapPin className="w-3.5 h-3.5 text-amber-400" />
+              <span>Pingar esta posição</span>
+            </button>
+
+            {userRole === "gm" && (
+              <>
+                <button
+                  onClick={() => {
+                    handleRegroupHeroesAt(contextMenu.gridX, contextMenu.gridY);
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-amber-300 hover:text-amber-200 flex items-center gap-2 font-medium"
+                >
+                  <Users className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Reagrupar Grupo Aqui</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setAddTokenCoords({ x: contextMenu.gridX, y: contextMenu.gridY });
+                    setShowAddTokenModal(true);
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-emerald-300 hover:text-emerald-200 flex items-center gap-2"
+                >
+                  <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Criar Token nesta célula</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Bottom Right Map Navigation Tips */}
       <div className="hidden md:flex absolute bottom-3 right-3 z-20 items-center gap-2 px-2.5 py-1 bg-neutral-900/80 backdrop-blur-sm border border-neutral-800/80 rounded-xl text-[10px] text-neutral-400 select-none pointer-events-none">
         <span className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-neutral-800 text-neutral-300 rounded font-mono font-bold">Scroll</kbd> Zoom
+          <kbd className="px-1 py-0.5 bg-neutral-800 text-neutral-300 rounded font-mono font-bold">W A S D / Setas</kbd> Mover Token
         </span>
         <span className="text-neutral-600">•</span>
         <span className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-neutral-800 text-neutral-300 rounded font-mono font-bold">Espaço</kbd> Mover
+          <kbd className="px-1 py-0.5 bg-neutral-800 text-neutral-300 rounded font-mono font-bold">Espaço</kbd> Pan
         </span>
         <span className="text-neutral-600">•</span>
         <span className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-neutral-800 text-neutral-300 rounded font-mono font-bold">0</kbd> Reset (100%)
+          <kbd className="px-1 py-0.5 bg-neutral-800 text-neutral-300 rounded font-mono font-bold">0</kbd> 100%
         </span>
       </div>
 
-      {/* Selected Token Quick Floating Action Panel */}
+      {/* Selected Token Quick Floating Action Panel with D-Pad Movement */}
       {selectedToken && (
-        <div className="absolute bottom-16 sm:bottom-4 left-3 right-3 sm:right-auto sm:left-4 z-30 bg-neutral-900/95 backdrop-blur-md border border-neutral-800 p-3 sm:p-4 rounded-2xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-start gap-3 sm:gap-4 animate-in slide-in-from-bottom-2 max-w-full sm:max-w-xl">
+        <div className="absolute bottom-16 sm:bottom-4 left-3 right-3 sm:right-auto sm:left-4 z-30 bg-neutral-900/95 backdrop-blur-md border border-neutral-800 p-3 sm:p-4 rounded-2xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-start gap-3 sm:gap-4 animate-in slide-in-from-bottom-2 max-w-full">
           <div className="flex items-center gap-2.5 sm:gap-3">
             <div
               className="w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden border-2 flex-shrink-0"
@@ -945,9 +1331,9 @@ export const BattleMap: React.FC<BattleMapProps> = ({
             </div>
             <div>
               <div className="text-xs font-bold font-serif text-amber-200 flex items-center gap-1.5 sm:gap-2">
-                <span className="truncate max-w-[110px] sm:max-w-[160px]">{selectedToken.name}</span>
-                <span className="text-[10px] px-1.5 py-0.5 bg-neutral-800 text-neutral-400 rounded-md font-sans">
-                  CA: {selectedToken.ac || 10}
+                <span className="truncate max-w-[100px] sm:max-w-[140px]">{selectedToken.name}</span>
+                <span className="text-[10px] px-1.5 py-0.5 bg-neutral-800 text-cyan-400 rounded-md font-mono">
+                  X:{selectedToken.x} Y:{selectedToken.y}
                 </span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
@@ -957,8 +1343,70 @@ export const BattleMap: React.FC<BattleMapProps> = ({
                     {selectedToken.hp} / {selectedToken.maxHp}
                   </span>
                 </span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-neutral-800 text-neutral-400 rounded">
+                  CA: {selectedToken.ac || 10}
+                </span>
               </div>
             </div>
+          </div>
+
+          <div className="h-8 w-px bg-neutral-800" />
+
+          {/* D-Pad Controller for precise movement */}
+          <div className="flex items-center gap-1">
+            <div className="flex flex-col items-center">
+              <button
+                onClick={() => handleNudgeToken(selectedToken.id, 0, -1)}
+                title="Mover para Cima (W / Seta Cima)"
+                className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-amber-300 rounded-md transition-colors"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </button>
+              <div className="flex items-center gap-1 mt-0.5">
+                <button
+                  onClick={() => handleNudgeToken(selectedToken.id, -1, 0)}
+                  title="Mover para Esquerda (A / Seta Esquerda)"
+                  className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-amber-300 rounded-md transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => handleCenterToken(selectedToken.id)}
+                  title="Centralizar no Mapa"
+                  className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-amber-300 rounded-md transition-colors"
+                >
+                  <Crosshair className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleNudgeToken(selectedToken.id, 1, 0)}
+                  title="Mover para Direita (D / Seta Direita)"
+                  className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-amber-300 rounded-md transition-colors"
+                >
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <button
+                onClick={() => handleNudgeToken(selectedToken.id, 0, 1)}
+                title="Mover para Baixo (S / Seta Baixo)"
+                className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-amber-300 rounded-md transition-colors mt-0.5"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Click to Move Toggle Button */}
+            <button
+              onClick={() => setIsClickToMoveActive(!isClickToMoveActive)}
+              title="Clique no Grid para Mover"
+              className={`flex flex-col items-center justify-center p-2 rounded-xl border text-[10px] font-semibold transition-all ${
+                isClickToMoveActive
+                  ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 ring-2 ring-cyan-400/50 animate-pulse"
+                  : "bg-neutral-800/80 border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-700"
+              }`}
+            >
+              <Footprints className="w-4 h-4 mb-0.5" />
+              <span>{isClickToMoveActive ? "Mirando..." : "Clique Posição"}</span>
+            </button>
           </div>
 
           <div className="hidden sm:block h-8 w-px bg-neutral-800" />

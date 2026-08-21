@@ -1,9 +1,14 @@
 import React, { useState } from "react";
-import { Volume2, Play, Square, Music, Sparkles, Sword, Dice5, Zap, Shield, FileText } from "lucide-react";
+import { Volume2, Play, Square, Music, Sparkles, Sword, Dice5, Zap, Shield, FileText, Sliders, VolumeX } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
 
 export const SoundboardPanel: React.FC = () => {
   const [activeAmbience, setActiveAmbience] = useState<string | null>(null);
+  const [masterVol, setMasterVol] = useState(rpgAudio.masterVolume);
+  const [ambientVol, setAmbientVol] = useState(rpgAudio.ambientVolume);
+  const [sfxVol, setSfxVol] = useState(rpgAudio.sfxVolume);
+  const [isMuted, setIsMuted] = useState(rpgAudio.isMuted);
+
   const [notes, setNotes] = useState<string>(() => {
     return localStorage.getItem("rpg_master_notes") || "• Pistas do Mistério:\n- Símbolo de Morte encontrado no porão.\n- O cultista fugiu em direção ao bosque.\n- Próximo desafio: Enigma das 4 Estátuas.";
   });
@@ -18,6 +23,26 @@ export const SoundboardPanel: React.FC = () => {
     }
   };
 
+  const handleToggleMute = () => {
+    const nextMuted = rpgAudio.toggleMute();
+    setIsMuted(nextMuted);
+  };
+
+  const handleMasterVol = (val: number) => {
+    setMasterVol(val);
+    rpgAudio.setMasterVolume(val);
+  };
+
+  const handleAmbientVol = (val: number) => {
+    setAmbientVol(val);
+    rpgAudio.setAmbientVolume(val);
+  };
+
+  const handleSfxVol = (val: number) => {
+    setSfxVol(val);
+    rpgAudio.setSfxVolume(val);
+  };
+
   const handleSaveNotes = (val: string) => {
     setNotes(val);
     localStorage.setItem("rpg_master_notes", val);
@@ -26,24 +51,94 @@ export const SoundboardPanel: React.FC = () => {
   return (
     <div className="w-full h-full bg-neutral-950 overflow-y-auto p-4 md:p-6 space-y-6 text-neutral-100">
       {/* Soundboard Audio FX */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 shadow-xl space-y-4">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 shadow-xl space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Volume2 className="w-5 h-5 text-amber-400" />
-            <h3 className="font-serif font-bold text-sm text-amber-100">Mesa de Efeitos Sonoros (Procedural Web Audio)</h3>
+            <h3 className="font-serif font-bold text-sm text-amber-100">Mesa de Áudio & Efeitos Sonoros</h3>
           </div>
-          {activeAmbience && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                rpgAudio.stopAmbience();
-                setActiveAmbience(null);
-              }}
-              className="px-3 py-1 bg-red-950 border border-red-800 text-red-300 rounded-xl text-xs font-bold flex items-center gap-1"
+              onClick={handleToggleMute}
+              className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                isMuted
+                  ? "bg-red-950/80 border-red-700 text-red-300"
+                  : "bg-neutral-950 border-neutral-800 text-neutral-300 hover:bg-neutral-800"
+              }`}
             >
-              <Square className="w-3 h-3" />
-              Parar Áudio
+              {isMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
+              <span>{isMuted ? "Mutado" : "Áudio Ativo"}</span>
             </button>
-          )}
+            {activeAmbience && (
+              <button
+                onClick={() => {
+                  rpgAudio.stopAmbience();
+                  setActiveAmbience(null);
+                }}
+                className="px-3 py-1 bg-red-950 border border-red-800 text-red-300 rounded-xl text-xs font-bold flex items-center gap-1"
+              >
+                <Square className="w-3 h-3" />
+                Parar Trilha
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Audio Mixer (Master, Ambient, SFX Channels) */}
+        <div className="bg-neutral-950/70 border border-neutral-800/90 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Mixer de Volume por Canais Separados</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] text-neutral-400 font-semibold">
+                <span>Volume Geral (Master)</span>
+                <span className="font-mono text-amber-400">{Math.round(masterVol * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={masterVol}
+                onChange={(e) => handleMasterVol(parseFloat(e.target.value))}
+                className="w-full accent-amber-500 bg-neutral-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] text-neutral-400 font-semibold">
+                <span>Trilha de Fundo / Ambiente</span>
+                <span className="font-mono text-purple-400">{Math.round(ambientVol * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={ambientVol}
+                onChange={(e) => handleAmbientVol(parseFloat(e.target.value))}
+                className="w-full accent-purple-500 bg-neutral-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] text-neutral-400 font-semibold">
+                <span>Efeitos Sonoros (SFX / Dados)</span>
+                <span className="font-mono text-emerald-400">{Math.round(sfxVol * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={sfxVol}
+                onChange={(e) => handleSfxVol(parseFloat(e.target.value))}
+                className="w-full accent-emerald-500 bg-neutral-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Ambience tracks */}

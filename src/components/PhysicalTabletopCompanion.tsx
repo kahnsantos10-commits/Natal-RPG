@@ -49,6 +49,11 @@ interface PhysicalCompanionProps {
   onUpdateTokens: (tokens: MapToken[]) => void;
   onSendChatMessage: (msg: string, type?: ChatMessage["type"], role?: ChatMessage["role"]) => void;
   onOpenPlayerDisplay: () => void;
+  onUndo?: () => void;
+  canUndo?: boolean;
+  undoCount?: number;
+  lastUndoDescription?: string;
+  onSaveSnapshot?: (description: string) => void;
 }
 
 interface Handout {
@@ -73,6 +78,11 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
   onUpdateTokens,
   onSendChatMessage,
   onOpenPlayerDisplay,
+  onUndo,
+  canUndo,
+  undoCount,
+  lastUndoDescription,
+  onSaveSnapshot,
 }) => {
   const [activeTab, setActiveTab] = useState<"handouts" | "screen" | "physical_dice" | "combat_tracker" | "tension_timer" | "improvisation">("handouts");
 
@@ -142,7 +152,6 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
       interval = setInterval(() => {
         setTimerSeconds((prev) => {
           if (prev <= 1) {
-            setIsTimerRunning(false);
             rpgAudio.playSwordHit();
             return 0;
           }
@@ -153,11 +162,18 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
           return prev - 1;
         });
       }, 1000);
-    } else if (timerSeconds === 0) {
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isTimerRunning, timerSeconds]);
+
+  // Safely stop timer when it reaches 0
+  React.useEffect(() => {
+    if (timerSeconds === 0 && isTimerRunning) {
       setIsTimerRunning(false);
     }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, timerSeconds]);
+  }, [timerSeconds, isTimerRunning]);
 
   // Quick HP Modifier for physical table tracking
   const handleModifyTokenHp = (tokenId: string, amount: number) => {
@@ -233,22 +249,27 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
 
   // Toggle Handout Reveal
   const handleToggleReveal = (id: string) => {
+    let revealedTitle: string | null = null;
     setHandouts((prev) =>
       prev.map((h) => {
         if (h.id === id) {
           const nextState = !h.isRevealedToPlayers;
           if (nextState) {
-            onSendChatMessage(
-              `📜 O Mestre revelou uma nova pista no Telão de Mesa: **"${h.title}"**!`,
-              "narration",
-              "gm"
-            );
+            revealedTitle = h.title;
           }
           return { ...h, isRevealedToPlayers: nextState };
         }
         return h;
       })
     );
+
+    if (revealedTitle) {
+      onSendChatMessage(
+        `📜 O Mestre revelou uma nova pista no Telão de Mesa: **"${revealedTitle}"**!`,
+        "narration",
+        "gm"
+      );
+    }
   };
 
   // Quick Print Current Handout
@@ -279,8 +300,33 @@ export const PhysicalTabletopCompanion: React.FC<PhysicalCompanionProps> = ({
           </div>
         </div>
 
-        {/* Action Button: Open Player Screen */}
+        {/* Action Buttons: GM Undo & Open Player Screen */}
         <div className="flex items-center gap-2">
+          {userRole === "gm" && onUndo && (
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className={`px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                canUndo
+                  ? "bg-amber-950/90 border-amber-500/80 text-amber-300 hover:bg-amber-900 shadow-md active:scale-95"
+                  : "bg-neutral-900 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
+              }`}
+              title={
+                canUndo
+                  ? `Desfazer última ação: ${lastUndoDescription || "Desfazer"} [Ctrl+Z]`
+                  : "Nenhuma ação recente para desfazer"
+              }
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>Desfazer</span>
+              {canUndo && undoCount && undoCount > 0 ? (
+                <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[10px] font-mono">
+                  {undoCount}
+                </span>
+              ) : null}
+            </button>
+          )}
+
           <button
             onClick={onOpenPlayerDisplay}
             className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-neutral-950 font-bold rounded-xl text-xs flex items-center gap-1.5 sm:gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition-all whitespace-nowrap"

@@ -1,3 +1,13 @@
+export interface UndoStateSnapshot {
+  timestamp: number;
+  description: string;
+  tokens: MapToken[];
+  combatants: InitiativeCombatant[];
+  mapData: MapData;
+  currentTurnIndex: number;
+  roundNumber: number;
+}
+
 export type RPGSystem = "dnd5e" | "ordem" | "custom" | "tormenta20";
 
 export type UserRole = "gm" | "player";
@@ -30,6 +40,7 @@ export interface InitiativeCombatant {
   type: "hero" | "enemy" | "npc" | "boss";
   avatar?: string;
   color?: string;
+  conditions?: string[];
 }
 
 export interface MapToken {
@@ -53,10 +64,22 @@ export interface MapToken {
   color: string;
   avatar?: string;
   model3D?: string;
+  z?: number; // vertical Z-axis height / altitude offset
   initiative?: number;
   hasActed?: boolean;
   notes?: string;
   owner?: string;
+}
+
+export interface AoETemplate {
+  id: string;
+  type: "circle" | "cone" | "cube" | "line";
+  originX: number;
+  originY: number;
+  radius: number; // in grid cells
+  color: string;
+  label?: string;
+  systemElement?: "fire" | "blood" | "death" | "energy" | "knowledge" | "generic";
 }
 
 export interface MapData {
@@ -69,6 +92,8 @@ export interface MapData {
   bgUrl?: string;
   fogOfWar: boolean;
   revealedCells: string[]; // "x,y"
+  aoeTemplates?: AoETemplate[];
+  gmPrivateNotes?: { id: string; x: number; y: number; text: string; title: string }[];
   drawings?: {
     id: string;
     type: "pen" | "line" | "rect" | "circle";
@@ -309,20 +334,56 @@ export interface CustomCharacter {
   notes: string;
 }
 
-// Room full payload
+// Session History Timeline Event
+export interface SessionHistoryEvent {
+  id: string;
+  type: "narration" | "roll" | "combat" | "note" | "clue" | "system";
+  title: string;
+  description: string;
+  timestamp: number;
+  author?: string;
+  details?: {
+    diceFormula?: string;
+    total?: number;
+    isCrit?: boolean;
+    isFumble?: boolean;
+    characterName?: string;
+    defeatedEnemies?: string[];
+    clueTitle?: string;
+  };
+}
+
+// User Profile / Auth State
+export interface UserProfile {
+  id: string;
+  name: string;
+  avatar: string;
+  role: UserRole;
+  preferredSystem: RPGSystem;
+  savedSessionIds: string[];
+}
+
+// Session & Room full payload
 export interface RoomState {
   id: string;
+  code: string;
   name: string;
   system: RPGSystem;
   gmName: string;
+  password?: string;
+  description?: string;
   map: MapData;
+  maps: MapData[];
   tokens: MapToken[];
   initiativeOrder: string[];
   currentTurnIndex: number;
   roundNumber: number;
   inCombat: boolean;
   messages: ChatMessage[];
+  history: SessionHistoryEvent[];
+  createdAt: number;
   lastUpdated: number;
 }
 
 export type RoomData = RoomState;
+

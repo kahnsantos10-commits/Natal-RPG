@@ -68,37 +68,66 @@ interface MapToken {
   hasActed?: boolean;
 }
 
+interface RoomHistoryEvent {
+  id: string;
+  type: "narration" | "roll" | "combat" | "note" | "clue" | "system";
+  title: string;
+  description: string;
+  timestamp: number;
+  author?: string;
+  details?: any;
+}
+
+interface RoomMapData {
+  id?: string;
+  name: string;
+  gridWidth: number;
+  gridHeight: number;
+  gridSize: number;
+  gridType?: "square" | "hex";
+  bgUrl?: string;
+  fogOfWar: boolean;
+  revealedCells: string[]; // "x,y"
+  drawings?: any[];
+  lighting?: "bright" | "dim" | "dark" | "paranormal_fog";
+}
+
 interface RoomData {
   id: string;
+  code: string;
   name: string;
   system: "dnd5e" | "ordem" | "custom" | "tormenta20";
   password?: string;
   gmName: string;
-  map: {
-    name: string;
-    gridWidth: number;
-    gridHeight: number;
-    gridSize: number;
-    gridType: "square" | "hex";
-    bgUrl?: string;
-    fogOfWar: boolean;
-    revealedCells: string[]; // "x,y"
-    drawings: any[];
-    lighting: "bright" | "dim" | "dark" | "paranormal_fog";
-  };
+  description?: string;
+  map: RoomMapData;
+  maps: RoomMapData[];
   tokens: MapToken[];
   initiativeOrder: string[]; // Token IDs
   currentTurnIndex: number;
   roundNumber: number;
   inCombat: boolean;
   messages: RoomMessage[];
+  history: RoomHistoryEvent[];
+  createdAt: number;
   lastUpdated: number;
 }
 
 const rooms = new Map<string, RoomData>();
 
+// Generate 6-char random alphanumeric code
+function generateRoomCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 // Helper seed room
-function createInitialRoom(id: string, name: string, system: "dnd5e" | "ordem" | "custom" | "tormenta20" = "dnd5e"): RoomData {
+function createInitialRoom(id: string, name: string, system: "dnd5e" | "ordem" | "custom" | "tormenta20" = "dnd5e", customCode?: string): RoomData {
+  const code = (customCode || (id.length <= 8 ? id.toUpperCase() : generateRoomCode())).slice(0, 8);
   const initialTokens: MapToken[] = system === "ordem" ? [
     {
       id: "tok-1",
@@ -220,25 +249,45 @@ function createInitialRoom(id: string, name: string, system: "dnd5e" | "ordem" |
     }
   }
 
+  const defaultMap: RoomMapData = {
+    id: "map-default",
+    name: system === "ordem" ? "Mansão Endiabrada - Sala Principal" : "Ruínas Esquecidas de Kar-Drak",
+    gridWidth: 16,
+    gridHeight: 12,
+    gridSize: 48,
+    gridType: "square",
+    bgUrl: system === "ordem"
+      ? "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80"
+      : "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80",
+    fogOfWar: false,
+    revealedCells: Array.from(revealed),
+    drawings: [],
+    lighting: system === "ordem" ? "paranormal_fog" : "dim",
+  };
+
+  const secondaryMap: RoomMapData = {
+    id: "map-alt",
+    name: system === "ordem" ? "Laboratório Subterrâneo" : "Taverna do Javali Saltitante",
+    gridWidth: 14,
+    gridHeight: 10,
+    gridSize: 48,
+    gridType: "square",
+    bgUrl: "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200&auto=format&fit=crop&q=80",
+    fogOfWar: false,
+    revealedCells: [],
+    drawings: [],
+    lighting: "bright",
+  };
+
   return {
     id,
+    code,
     name,
     system,
     gmName: "Mestre Supremo",
-    map: {
-      name: system === "ordem" ? "Mansão Endiabrada - Sala Principal" : "Ruínas Esquecidas de Kar-Drak",
-      gridWidth: 16,
-      gridHeight: 12,
-      gridSize: 48,
-      gridType: "square",
-      bgUrl: system === "ordem"
-        ? "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80"
-        : "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80",
-      fogOfWar: false,
-      revealedCells: Array.from(revealed),
-      drawings: [],
-      lighting: system === "ordem" ? "paranormal_fog" : "dim",
-    },
+    description: `Campanha ativa no sistema ${system.toUpperCase()}`,
+    map: defaultMap,
+    maps: [defaultMap, secondaryMap],
     tokens: initialTokens,
     initiativeOrder: ["tok-2", "tok-1", "tok-3"],
     currentTurnIndex: 0,
@@ -249,7 +298,7 @@ function createInitialRoom(id: string, name: string, system: "dnd5e" | "ordem" |
         id: "msg-1",
         sender: "Sistema",
         role: "system",
-        text: `Sessão Natal-RPG iniciada no sistema ${system === "ordem" ? "Ordem Paranormal RPG" : system === "dnd5e" ? "D&D 5ª Edição" : "Ficha Livre / Custom"}. A IA Mestre está pronta para narrar e responder a comandos!`,
+        text: `Sessão Natal-RPG iniciada no sistema ${system === "ordem" ? "Ordem Paranormal RPG" : system === "dnd5e" ? "D&D 5ª Edição" : "Ficha Livre / Custom"}. Código da Sala: ${code}`,
         timestamp: Date.now() - 60000,
       },
       {
@@ -262,48 +311,119 @@ function createInitialRoom(id: string, name: string, system: "dnd5e" | "ordem" |
         timestamp: Date.now() - 30000,
       },
     ],
+    history: [
+      {
+        id: "hist-1",
+        type: "system",
+        title: "Sessão Criada",
+        description: `Mesa inicializada com código ${code} no sistema ${system.toUpperCase()}`,
+        timestamp: Date.now() - 120000,
+        author: "Sistema",
+      },
+      {
+        id: "hist-2",
+        type: "narration",
+        title: "Início da Aventura",
+        description: "Os aventureiros cruzaram o limiar do território desconhecido.",
+        timestamp: Date.now() - 60000,
+        author: "Mestre IA",
+      },
+    ],
+    createdAt: Date.now(),
     lastUpdated: Date.now(),
   };
 }
 
 // Seed default rooms
-rooms.set("sala-demo", createInitialRoom("sala-demo", "Mesa Oficial Natal-RPG (D&D 5e)", "dnd5e"));
-rooms.set("sala-ordem", createInitialRoom("sala-ordem", "Operação Calafrio (Ordem Paranormal)", "ordem"));
+rooms.set("sala-demo", createInitialRoom("sala-demo", "Mesa Oficial Natal-RPG (D&D 5e)", "dnd5e", "NATAL1"));
+rooms.set("sala-ordem", createInitialRoom("sala-ordem", "Operação Calafrio (Ordem Paranormal)", "ordem", "ORDEM1"));
 
 // API Health
 app.get("/api/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok", version: "1.0.0", activeRooms: rooms.size });
+  res.json({ status: "ok", version: "1.1.0", activeRooms: rooms.size });
 });
 
 // Rooms Management
 app.get("/api/rooms", (_req: Request, res: Response) => {
   const roomList = Array.from(rooms.values()).map(r => ({
     id: r.id,
+    code: r.code,
     name: r.name,
     system: r.system,
     gmName: r.gmName,
+    description: r.description,
     tokenCount: r.tokens.length,
+    mapCount: r.maps?.length || 1,
     inCombat: r.inCombat,
+    hasPassword: Boolean(r.password),
+    createdAt: r.createdAt,
     lastUpdated: r.lastUpdated
   }));
   res.json(roomList);
 });
 
+// Join room by 6-char Code or ID
+app.post("/api/rooms/join", (req: Request, res: Response) => {
+  const { codeOrId, password } = req.body;
+  if (!codeOrId) {
+    return res.status(400).json({ error: "Código ou ID da sala é obrigatório." });
+  }
+
+  const query = codeOrId.trim().toLowerCase();
+  const upperQuery = codeOrId.trim().toUpperCase();
+
+  // Search by exact ID or exact Code
+  let foundRoom: RoomData | undefined;
+  for (const room of rooms.values()) {
+    if (room.id.toLowerCase() === query || room.code.toUpperCase() === upperQuery) {
+      foundRoom = room;
+      break;
+    }
+  }
+
+  if (!foundRoom) {
+    // If not found, create new room with this code/ID
+    const newId = query.startsWith("room-") ? query : `room-${query}`;
+    foundRoom = createInitialRoom(newId, `Mesa ${upperQuery}`, "dnd5e", upperQuery);
+    rooms.set(newId, foundRoom);
+  }
+
+  // Password check if required
+  if (foundRoom.password && foundRoom.password !== password) {
+    return res.status(403).json({ error: "Senha incorreta para esta sessão.", requiresPassword: true });
+  }
+
+  res.json(foundRoom);
+});
+
 app.get("/api/rooms/:id", (req: Request, res: Response) => {
-  let room = rooms.get(req.params.id);
+  const query = req.params.id.trim();
+  let room = rooms.get(query);
+  if (!room) {
+    // Check if queried by code
+    for (const r of rooms.values()) {
+      if (r.code.toUpperCase() === query.toUpperCase()) {
+        room = r;
+        break;
+      }
+    }
+  }
   if (!room) {
     // Auto-create room for quick play if requested
-    room = createInitialRoom(req.params.id, `Mesa ${req.params.id.toUpperCase()}`, "dnd5e");
-    rooms.set(req.params.id, room);
+    room = createInitialRoom(query.toLowerCase(), `Mesa ${query.toUpperCase()}`, "dnd5e", query.toUpperCase().slice(0, 6));
+    rooms.set(query.toLowerCase(), room);
   }
   res.json(room);
 });
 
 app.post("/api/rooms/create", (req: Request, res: Response) => {
-  const { id, name, system, gmName } = req.body;
+  const { id, code, name, system, gmName, password, description } = req.body;
   const roomId = (id || `room-${Date.now().toString(36)}`).toLowerCase().trim();
-  const room = createInitialRoom(roomId, name || `Mesa ${roomId}`, system || "dnd5e");
+  const roomCode = (code || generateRoomCode()).toUpperCase().trim().slice(0, 8);
+  const room = createInitialRoom(roomId, name || `Mesa ${roomCode}`, system || "dnd5e", roomCode);
   if (gmName) room.gmName = gmName;
+  if (password) room.password = password;
+  if (description) room.description = description;
   rooms.set(roomId, room);
   res.json(room);
 });
@@ -314,16 +434,80 @@ app.post("/api/rooms/:id/update", (req: Request, res: Response) => {
     return res.status(404).json({ error: "Sala não encontrada" });
   }
 
-  const { tokens, map, initiativeOrder, currentTurnIndex, roundNumber, inCombat } = req.body;
+  const { tokens, map, maps, initiativeOrder, currentTurnIndex, roundNumber, inCombat, description, name } = req.body;
   if (tokens !== undefined) room.tokens = tokens;
   if (map !== undefined) room.map = { ...room.map, ...map };
+  if (maps !== undefined) room.maps = maps;
   if (initiativeOrder !== undefined) room.initiativeOrder = initiativeOrder;
   if (currentTurnIndex !== undefined) room.currentTurnIndex = currentTurnIndex;
   if (roundNumber !== undefined) room.roundNumber = roundNumber;
   if (inCombat !== undefined) room.inCombat = inCombat;
+  if (description !== undefined) room.description = description;
+  if (name !== undefined) room.name = name;
 
   room.lastUpdated = Date.now();
   res.json(room);
+});
+
+// Session History Endpoints
+app.get("/api/rooms/:id/history", (req: Request, res: Response) => {
+  const room = rooms.get(req.params.id);
+  if (!room) return res.status(404).json({ error: "Sala não encontrada" });
+  res.json(room.history || []);
+});
+
+app.post("/api/rooms/:id/history", (req: Request, res: Response) => {
+  const room = rooms.get(req.params.id);
+  if (!room) return res.status(404).json({ error: "Sala não encontrada" });
+
+  const { type, title, description, author, details } = req.body;
+  const newEvent: RoomHistoryEvent = {
+    id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type: type || "note",
+    title: title || "Acontecimento Registrado",
+    description: description || "",
+    timestamp: Date.now(),
+    author: author || "Mestre",
+    details,
+  };
+
+  if (!room.history) room.history = [];
+  room.history.unshift(newEvent); // newest first
+  if (room.history.length > 200) room.history = room.history.slice(0, 200);
+
+  room.lastUpdated = Date.now();
+  res.json({ event: newEvent, history: room.history });
+});
+
+// Map Presets & Management Endpoints
+app.post("/api/rooms/:id/maps", (req: Request, res: Response) => {
+  const room = rooms.get(req.params.id);
+  if (!room) return res.status(404).json({ error: "Sala não encontrada" });
+
+  const { map, maps, activeMapId } = req.body;
+  if (maps) room.maps = maps;
+  if (map) {
+    room.map = map;
+    // ensure it's in room.maps
+    if (!room.maps) room.maps = [];
+    const idx = room.maps.findIndex(m => m.id === map.id || m.name === map.name);
+    if (idx >= 0) {
+      room.maps[idx] = map;
+    } else {
+      room.maps.push(map);
+    }
+  }
+
+  room.lastUpdated = Date.now();
+  res.json({ map: room.map, maps: room.maps });
+});
+
+app.delete("/api/rooms/:id", (req: Request, res: Response) => {
+  if (rooms.has(req.params.id)) {
+    rooms.delete(req.params.id);
+    return res.json({ success: true, message: "Sala removida com sucesso." });
+  }
+  res.status(404).json({ error: "Sala não encontrada" });
 });
 
 app.post("/api/rooms/:id/chat", (req: Request, res: Response) => {
@@ -701,6 +885,67 @@ Retorne estritamente um JSON no formato:
       : "Se este pergaminho caiu em tuas mãos, a Torre do Sol já sucumbiu. Apenas a chama eterna mantida no altar das catacumbas poderá conter a legião sombria. Que os deuses guiem teus passos.",
     secretNotes: "Permite um teste de Percepção / Investigação DT 14 para notar que o papel foi manchado intencionalmente para esconder uma assinatura.",
     imageUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80"
+  });
+});
+
+// 6. AI Map Prompt Generator for Midjourney / DALL-E / Imagen / AI Studio
+app.post("/api/ai/map-prompt", async (req: Request, res: Response) => {
+  const { system = "dnd5e", theme = "masmorra", lighting = "dramatica", customDetails = "" } = req.body;
+
+  const aiPrompt = `Você é um mestre cartógrafo de RPG e especialista em prompts para geradores de imagem de Inteligência Artificial (Midjourney v6, DALL-E 3, Stable Diffusion XL, Imagen 3).
+Gere prompts otimizados para um mapa de batalha vista de cima (top-down / overhead battlemap) com base nos parâmetros:
+Sistema de RPG: ${system}
+Tema do Mapa: ${theme}
+Estilo de Iluminação: ${lighting}
+Detalhes Específicos: ${customDetails || "Nenhum detalhe extra especificado"}
+
+Exija no prompt que a imagem seja do topo reto (orthographic top-down / overhead perspective), sem ângulos isométricos ou 3D enviesados, sem personagens/tokens desenhados no chão e pronta para uso em VTT (Virtual Tabletop).
+
+Retorne um JSON estrito no formato:
+{
+  "title": "Título descritivo do Mapa em Português",
+  "englishPrompt": "Prompt em Inglês profissional e otimizado para Midjourney/DALL-E com parâmetros como --ar 16:9 --v 6.0",
+  "portuguesePrompt": "Prompt equivalente detalhado em Português para uso em IA",
+  "negativePrompt": "O que EVITAR (ex: no characters, no 3d isometric angle, no text, no watermark, no borders)",
+  "suggestedGridSize": "Ex: 20x12 ou 16x9 (Tamanho de Grid Recomendado)",
+  "recommendedLighting": "Descrição do clima e luz para o Mestre narrarem",
+  "keyElements": ["Elemento de cenário 1", "Elemento de cenário 2", "Elemento de cenário 3"]
+}`;
+
+  try {
+    const ai = getGeminiAI();
+    if (ai) {
+      const response = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: aiPrompt,
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.8,
+        },
+      });
+
+      const text = response.text?.trim();
+      if (text) {
+        return res.json(JSON.parse(text));
+      }
+    }
+  } catch (err) {
+    console.error("Map prompt AI error:", err);
+  }
+
+  // Fallback
+  res.json({
+    title: system === "ordem" ? "Mansão Abandonada com Círculo Paranormal" : "Masmorra Ancestral de Pedra",
+    englishPrompt: `Top-down RPG battlemap, orthographic 2D overhead view of a ${theme || "dungeon"} interior, highly detailed stone floor, ${lighting || "dramatic torch lighting"}, tactical grid layout, 8k resolution, photorealistic textures, D&D battlemap for Roll20 --ar 16:9 --v 6.0`,
+    portuguesePrompt: `Mapa de batalha para RPG, visão de cima reto 2D orthographic, interior de ${theme || "masmorra de pedra"}, iluminação ${lighting || "dramática com tochas"}, detalhes em alta resolução 8k, piso trabalhado, sem personagens, pronto para mesa virtual VTT --ar 16:9`,
+    negativePrompt: "no characters, no 3d isometric perspective angle, no text, no watermark, no logos, no grid lines drawn",
+    suggestedGridSize: "20x12 (Grid Padrão)",
+    recommendedLighting: "Luz ambiente difusa com focos de luz avermelhada e iluminação de tochas rasantes.",
+    keyElements: [
+      "Piso trabalhado com marcas de ritual",
+      "Pilares de sustentação nas laterais",
+      "Móveis quebrados e destroços nas bordas"
+    ]
   });
 });
 

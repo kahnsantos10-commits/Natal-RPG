@@ -107,20 +107,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                       Fórmula: <strong className="text-neutral-200">{roll.formula}</strong>
                     </div>
                     {roll.rolls.length > 0 && (
-                      <div className="text-[10px] text-neutral-400 font-mono flex items-center gap-1">
-                        Dados: [
+                      <div className="text-[10px] text-neutral-400 font-mono flex items-center gap-1 flex-wrap">
+                        <span>Dados: [</span>
                         {roll.rolls.map((r, i) => (
                           <span
                             key={i}
-                            className={`font-bold ${
-                              r === 20 ? "text-emerald-400" : r === 1 ? "text-red-400" : "text-amber-300"
+                            className={`font-bold px-1 rounded ${
+                              r === 20
+                                ? "bg-emerald-950 text-emerald-300 border border-emerald-600"
+                                : r === 1
+                                ? "bg-red-950 text-red-300 border border-red-600"
+                                : "text-amber-300"
                             }`}
                           >
                             {r}
+                            {r === 20 ? "★" : r === 1 ? "⚠" : ""}
                             {i < roll.rolls.length - 1 ? ", " : ""}
                           </span>
                         ))}
-                        ]
+                        <span>]</span>
                         {roll.modifier !== 0 && (
                           <span>
                             {roll.modifier >= 0 ? ` + ${roll.modifier}` : ` - ${Math.abs(roll.modifier)}`}
@@ -130,7 +135,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     )}
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-right flex flex-col items-end">
                     <div
                       className={`text-xl font-mono font-extrabold ${
                         isCrit ? "text-emerald-400 animate-pulse" : isFumble ? "text-red-400" : "text-amber-300"
@@ -139,13 +144,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                       {roll.total}
                     </div>
                     {isCrit && (
-                      <span className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider">
-                        ★ ACERTO CRÍTICO!
+                      <span className="px-2 py-0.5 bg-emerald-950 border border-emerald-500 rounded-md text-[10px] font-extrabold text-emerald-300 flex items-center gap-1 shadow-sm">
+                        ⭐ CRÍTICO
                       </span>
                     )}
                     {isFumble && (
-                      <span className="text-[9px] uppercase font-bold text-red-400 tracking-wider">
-                        DESASTRE / ERRO CRÍTICO
+                      <span className="px-2 py-0.5 bg-red-950 border border-red-500 rounded-md text-[10px] font-extrabold text-red-300 flex items-center gap-1 shadow-sm">
+                        💥 DESASTRE
                       </span>
                     )}
                   </div>

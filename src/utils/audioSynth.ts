@@ -3,9 +3,16 @@
 class RPGAudioEngine {
   private ctx: AudioContext | null = null;
   private ambientGain: GainNode | null = null;
+  private sfxGain: GainNode | null = null;
+  private masterGain: GainNode | null = null;
   private ambientOscillators: (OscillatorNode | AudioBufferSourceNode)[] = [];
   public isMuted: boolean = false;
   public currentAmbient: string = "none";
+
+  // Channel volumes (0.0 to 1.0)
+  public masterVolume: number = 0.8;
+  public ambientVolume: number = 0.6;
+  public sfxVolume: number = 0.85;
 
   private getContext(): AudioContext {
     if (!this.ctx) {
@@ -18,11 +25,53 @@ class RPGAudioEngine {
     return this.ctx;
   }
 
+  private getMasterGain(): GainNode {
+    const ctx = this.getContext();
+    if (!this.masterGain) {
+      this.masterGain = ctx.createGain();
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.masterVolume, ctx.currentTime);
+      this.masterGain.connect(ctx.destination);
+    }
+    return this.masterGain;
+  }
+
+  private getSfxGain(): GainNode {
+    const ctx = this.getContext();
+    if (!this.sfxGain) {
+      this.sfxGain = ctx.createGain();
+      this.sfxGain.gain.setValueAtTime(this.sfxVolume, ctx.currentTime);
+      this.sfxGain.connect(this.getMasterGain());
+    }
+    return this.sfxGain;
+  }
+
+  public setMasterVolume(val: number) {
+    this.masterVolume = Math.max(0, Math.min(1, val));
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.masterVolume, this.ctx.currentTime);
+    }
+  }
+
+  public setAmbientVolume(val: number) {
+    this.ambientVolume = Math.max(0, Math.min(1, val));
+    if (this.ambientGain && this.ctx) {
+      this.ambientGain.gain.setValueAtTime(this.ambientVolume * 0.15, this.ctx.currentTime);
+    }
+  }
+
+  public setSfxVolume(val: number) {
+    this.sfxVolume = Math.max(0, Math.min(1, val));
+    if (this.sfxGain && this.ctx) {
+      this.sfxGain.gain.setValueAtTime(this.sfxVolume, this.ctx.currentTime);
+    }
+  }
+
   // Play realistic dice rolling rattle and clatter
   playDiceRoll() {
     if (this.isMuted) return;
     try {
       const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
       const count = 3 + Math.floor(Math.random() * 3);
 
       for (let i = 0; i < count; i++) {
@@ -43,7 +92,7 @@ class RPGAudioEngine {
 
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(sfxNode);
 
         osc.start(time);
         osc.stop(time + 0.07);
@@ -58,6 +107,7 @@ class RPGAudioEngine {
     if (this.isMuted) return;
     try {
       const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
       const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6 arpeggio
 
       notes.forEach((freq, idx) => {
@@ -72,7 +122,7 @@ class RPGAudioEngine {
         gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.45);
 
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(sfxNode);
 
         osc.start(startTime);
         osc.stop(startTime + 0.5);
@@ -85,6 +135,7 @@ class RPGAudioEngine {
     if (this.isMuted) return;
     try {
       const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
@@ -96,7 +147,7 @@ class RPGAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(sfxNode);
 
       osc.start();
       osc.stop(ctx.currentTime + 0.5);
@@ -108,6 +159,7 @@ class RPGAudioEngine {
     if (this.isMuted) return;
     try {
       const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
@@ -119,7 +171,7 @@ class RPGAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(sfxNode);
 
       osc.start();
       osc.stop(ctx.currentTime + 0.45);
@@ -131,6 +183,7 @@ class RPGAudioEngine {
     if (this.isMuted) return;
     try {
       const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
       const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate);
       const output = noiseBuffer.getChannelData(0);
       for (let i = 0; i < noiseBuffer.length; i++) {
@@ -151,7 +204,7 @@ class RPGAudioEngine {
 
       whiteNoise.connect(filter);
       filter.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(sfxNode);
 
       whiteNoise.start();
       whiteNoise.stop(ctx.currentTime + 0.15);
@@ -163,6 +216,7 @@ class RPGAudioEngine {
     if (this.isMuted) return;
     try {
       const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
@@ -174,10 +228,58 @@ class RPGAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(sfxNode);
 
       osc.start();
       osc.stop(ctx.currentTime + 0.22);
+    } catch (e) {}
+  }
+
+  // Token Movement / Footstep sound
+  playTokenMove() {
+    if (this.isMuted) return;
+    try {
+      const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(140, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.08);
+
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+
+      osc.connect(gain);
+      gain.connect(sfxNode);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.09);
+    } catch (e) {}
+  }
+
+  // Footstep / Walk sound
+  playFootstep() {
+    if (this.isMuted) return;
+    try {
+      const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(120 + Math.random() * 30, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.06);
+
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+
+      osc.connect(gain);
+      gain.connect(sfxNode);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.07);
     } catch (e) {}
   }
 
@@ -200,8 +302,8 @@ class RPGAudioEngine {
     try {
       const ctx = this.getContext();
       this.ambientGain = ctx.createGain();
-      this.ambientGain.gain.setValueAtTime(0.12, ctx.currentTime);
-      this.ambientGain.connect(ctx.destination);
+      this.ambientGain.gain.setValueAtTime(this.ambientVolume * 0.15, ctx.currentTime);
+      this.ambientGain.connect(this.getMasterGain());
 
       if (type === "paranormal") {
         // Eerie dissonant drone
@@ -271,8 +373,37 @@ class RPGAudioEngine {
     this.currentAmbient = "none";
   }
 
+  // Play magical spell or action sound
+  playSpellCast() {
+    if (this.isMuted) return;
+    try {
+      const ctx = this.getContext();
+      const sfxNode = this.getSfxGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
+
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+      osc.connect(gain);
+      gain.connect(sfxNode);
+
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {
+      console.warn("Audio synth play error", e);
+    }
+  }
+
   toggleMute(): boolean {
     this.isMuted = !this.isMuted;
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.masterVolume, this.ctx.currentTime);
+    }
     if (this.isMuted) {
       this.stopAmbient();
     }

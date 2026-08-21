@@ -24,6 +24,11 @@ interface InitiativeTrackerProps {
   onPreviousTurn: () => void;
   onUpdateCombatants: (combatants: InitiativeCombatant[]) => void;
   onResetEncounter: () => void;
+  onUndo?: () => void;
+  canUndo?: boolean;
+  undoCount?: number;
+  lastUndoDescription?: string;
+  onSaveSnapshot?: (description: string) => void;
 }
 
 export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
@@ -36,13 +41,26 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
   onPreviousTurn,
   onUpdateCombatants,
   onResetEncounter,
+  onUndo,
+  canUndo,
+  undoCount,
+  lastUndoDescription,
+  onSaveSnapshot,
 }) => {
   const handleSortInitiative = () => {
+    if (onSaveSnapshot) {
+      onSaveSnapshot("Ordenar Iniciativa");
+    }
     const sorted = [...combatants].sort((a, b) => b.initiative - a.initiative);
     onUpdateCombatants(sorted);
   };
 
   const handleUpdateHp = (id: string, delta: number) => {
+    const target = combatants.find((c) => c.id === id);
+    if (target && onSaveSnapshot) {
+      onSaveSnapshot(`HP de ${target.name} (${delta > 0 ? "+" : ""}${delta})`);
+    }
+
     onUpdateCombatants(
       combatants.map((c) => {
         if (c.id === id) {
@@ -55,6 +73,10 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
   };
 
   const handleRemoveCombatant = (id: string) => {
+    const target = combatants.find((c) => c.id === id);
+    if (target && onSaveSnapshot) {
+      onSaveSnapshot(`Remover ${target.name} do combate`);
+    }
     onUpdateCombatants(combatants.filter((c) => c.id !== id));
   };
 
@@ -74,6 +96,31 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
 
         {userRole === "gm" && (
           <div className="flex items-center gap-1.5">
+            {onUndo && (
+              <button
+                onClick={onUndo}
+                disabled={!canUndo}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                  canUndo
+                    ? "bg-amber-950/80 border-amber-600/80 text-amber-300 hover:bg-amber-900 shadow-sm"
+                    : "bg-neutral-950 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
+                }`}
+                title={
+                  canUndo
+                    ? `Desfazer última ação: ${lastUndoDescription || "Desfazer"} [Ctrl+Z]`
+                    : "Nenhuma ação para desfazer"
+                }
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                <span>Desfazer</span>
+                {canUndo && undoCount && undoCount > 0 ? (
+                  <span className="px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[9px]">
+                    {undoCount}
+                  </span>
+                ) : null}
+              </button>
+            )}
+
             <button
               onClick={handleSortInitiative}
               className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-bold rounded-lg"
@@ -149,6 +196,18 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
                     <div className="text-[10px] text-neutral-400">
                       {c.hp} / {c.maxHp} HP
                     </div>
+                    {c.conditions && c.conditions.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {c.conditions.map((cond, cIdx) => (
+                          <span
+                            key={cIdx}
+                            className="px-1.5 py-0.2 bg-purple-950/80 border border-purple-700/80 text-purple-200 rounded text-[9px] font-bold"
+                          >
+                            {cond}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

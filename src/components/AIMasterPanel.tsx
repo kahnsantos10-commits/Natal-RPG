@@ -14,7 +14,12 @@ import {
   Zap,
   Eye,
   Dice5,
-  Volume2
+  Volume2,
+  Map,
+  Copy,
+  Check,
+  Layers,
+  Sparkle
 } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
 
@@ -31,7 +36,7 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
   onAddTokenToMap,
   activeCharacterName,
 }) => {
-  const [activeTab, setActiveTab] = useState<"narrative" | "npc" | "encounter" | "riddle">("narrative");
+  const [activeTab, setActiveTab] = useState<"narrative" | "npc" | "encounter" | "map_prompt">("narrative");
 
   // Narrative generator state
   const [playerAction, setPlayerAction] = useState("");
@@ -51,6 +56,18 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
   const [encounterDiff, setEncounterDiff] = useState("médio");
   const [generatedEncounter, setGeneratedEncounter] = useState<any | null>(null);
   const [isLoadingEncounter, setIsLoadingEncounter] = useState(false);
+
+  // Map Prompt generator state
+  const [mapTheme, setMapTheme] = useState(
+    system === "ordem" ? "Mansão Abandonada com Símbolos Paranormais" : "Masmorra Ancestral de Pedra"
+  );
+  const [mapLighting, setMapLighting] = useState(
+    system === "ordem" ? "Luzes de emergência vermelhas e névoa roxa" : "Tochas bruxuleantes e sombras dramáticas"
+  );
+  const [mapCustom, setMapCustom] = useState("");
+  const [generatedMapPrompt, setGeneratedMapPrompt] = useState<any | null>(null);
+  const [isLoadingMapPrompt, setIsLoadingMapPrompt] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Handle Narrative Request
   const handleGenerateNarrative = async () => {
@@ -128,6 +145,38 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
     }
   };
 
+  // Handle Map Prompt Generation
+  const handleGenerateMapPrompt = async () => {
+    setIsLoadingMapPrompt(true);
+    rpgAudio.playMagicSpell();
+
+    try {
+      const res = await fetch("/api/ai/map-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system,
+          theme: mapTheme,
+          lighting: mapLighting,
+          customDetails: mapCustom,
+        }),
+      });
+      const data = await res.json();
+      setGeneratedMapPrompt(data);
+    } catch (err) {
+      console.error("Map prompt generation error:", err);
+    } finally {
+      setIsLoadingMapPrompt(false);
+    }
+  };
+
+  const handleCopyText = (text: string, fieldId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldId);
+    rpgAudio.playDiceRoll();
+    setTimeout(() => setCopiedField(null), 2500);
+  };
+
   const handleAddNpcToGrid = () => {
     if (!generatedNpc || !onAddTokenToMap) return;
     const token: MapToken = {
@@ -180,11 +229,12 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-neutral-800 gap-2">
+      <div className="flex border-b border-neutral-800 gap-2 overflow-x-auto pb-1">
         {[
           { id: "narrative", label: "Narração de Cena", icon: Sparkles },
           { id: "npc", label: "Gerador de Inimigos / NPCs", icon: Skull },
           { id: "encounter", label: "Gerador de Encontros", icon: Compass },
+          { id: "map_prompt", label: "Prompts de Mapa Top-Down 🗺️", icon: Map },
         ].map((t) => {
           const Icon = t.icon;
           return (
@@ -521,6 +571,224 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
             ) : (
               <div className="text-center py-16 text-xs text-neutral-500">
                 Gere encontros táticos com armadilhas, perigos do terreno e reviravoltas no combate.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: Map Prompt Generator */}
+      {activeTab === "map_prompt" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Map Config Inputs */}
+          <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <Map className="w-4 h-4" />
+                Gerador de Prompts para Mapas de Batalha (Top-Down)
+              </h3>
+              <span className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold px-2 py-0.5 rounded-full">
+                Vista de Cima (Overhead)
+              </span>
+            </div>
+
+            {/* Presets */}
+            <div>
+              <label className="text-xs text-neutral-400 font-medium">Presets Rápidos de Cenário</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1.5">
+                {[
+                  { label: "Mansão Oculta", theme: "Mansão antiga com símbolos de Sangue e espelhos rachados", light: "Luzes de emergência vermelhas e névoa roxa" },
+                  { label: "Masmorra Ancestral", theme: "Masmorra de pedra subterrânea com sarcófago e colunas", light: "Tochas bruxuleantes e iluminação azulada" },
+                  { label: "Taverna do Povoado", theme: "Taverna de madeira aconchegante com mesas, lareira e bar", light: "Luz quente de velas e fogueira" },
+                  { label: "Floresta / Clareira", theme: "Clareira em floresta mística com cogumelos luminescentes", light: "Luz do luar e brilho azul esverdeado" },
+                  { label: "Laboratório Clandestino", theme: "Laboratório científico com tubos de ensaio e computadores", light: "Tubo neon verde fluorescente e monitores" },
+                  { label: "Templo Rúnico", theme: "Altar cerimonial de obsidiana com inscrições douradas", light: "Raios solares filtrados por vitrais" },
+                ].map((p, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setMapTheme(p.theme);
+                      setMapLighting(p.light);
+                      rpgAudio.playDiceRoll();
+                    }}
+                    className="px-2.5 py-1.5 bg-neutral-950 hover:bg-purple-950/40 border border-neutral-800 hover:border-purple-500/40 text-neutral-300 hover:text-purple-200 text-[11px] font-semibold rounded-xl text-left transition-all truncate"
+                  >
+                    ✨ {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-neutral-400 font-medium">Tema ou Local do Mapa</label>
+              <input
+                type="text"
+                value={mapTheme}
+                onChange={(e) => setMapTheme(e.target.value)}
+                placeholder="Ex: Laboratório abandonado, Cripta do Rei, Ponte de Pedra sobre lava..."
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-neutral-400 font-medium">Estilo de Iluminação & Atmosfera</label>
+              <input
+                type="text"
+                value={mapLighting}
+                onChange={(e) => setMapLighting(e.target.value)}
+                placeholder="Ex: Tochas, névoa roxa, luz da lua, neon cyberpunk, sol da tarde..."
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-100 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-neutral-400 font-medium">Detalhes Específicos do Cenário (Opcional)</label>
+              <textarea
+                value={mapCustom}
+                onChange={(e) => setMapCustom(e.target.value)}
+                rows={2}
+                placeholder="Ex: Incluir mesa de necropsia no centro, sangue seco no chão, estantes com livros antigos e porta trancada..."
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl p-3 text-xs text-neutral-100 focus:outline-none focus:border-amber-500 resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={handleGenerateMapPrompt}
+                disabled={isLoadingMapPrompt}
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 disabled:opacity-50 text-neutral-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg transition-all active:scale-95"
+              >
+                {isLoadingMapPrompt ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Gerando Prompts Perfeitos...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-4 h-4" />
+                    Gerar Prompts de Mapa
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Generated Prompts Output Card */}
+          <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-3xl shadow-xl flex flex-col justify-between min-h-[360px]">
+            {generatedMapPrompt ? (
+              <div className="space-y-4 text-xs">
+                <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                  <h4 className="text-sm font-bold font-serif text-amber-300 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    {generatedMapPrompt.title}
+                  </h4>
+                  <span className="text-[10px] bg-neutral-950 border border-neutral-800 px-2 py-0.5 rounded-lg text-neutral-400 font-mono">
+                    {generatedMapPrompt.suggestedGridSize || "16:9 (VTT Ready)"}
+                  </span>
+                </div>
+
+                {/* Prompt em Inglês (Midjourney / DALL-E / Stable Diffusion / Gemini) */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-extrabold text-amber-400 flex items-center gap-1">
+                      🇬🇧 Prompt em Inglês (Midjourney v6 / DALL-E 3 / Imagen 3)
+                    </span>
+                    <button
+                      onClick={() => handleCopyText(generatedMapPrompt.englishPrompt, "eng")}
+                      className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg font-bold flex items-center gap-1 transition-all"
+                    >
+                      {copiedField === "eng" ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          Copiado!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          Copiar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="bg-neutral-950 p-3 rounded-2xl border border-neutral-800 text-neutral-200 font-mono text-[11px] leading-relaxed select-all">
+                    {generatedMapPrompt.englishPrompt}
+                  </div>
+                </div>
+
+                {/* Prompt em Português */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-extrabold text-purple-400 flex items-center gap-1">
+                      🇧🇷 Prompt em Português
+                    </span>
+                    <button
+                      onClick={() => handleCopyText(generatedMapPrompt.portuguesePrompt, "pt")}
+                      className="px-2.5 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 rounded-lg font-bold flex items-center gap-1 transition-all"
+                    >
+                      {copiedField === "pt" ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          Copiado!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          Copiar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="bg-neutral-950 p-2.5 rounded-2xl border border-neutral-800 text-neutral-300 text-[11px] leading-relaxed">
+                    {generatedMapPrompt.portuguesePrompt}
+                  </div>
+                </div>
+
+                {/* Negative Prompt */}
+                {generatedMapPrompt.negativePrompt && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-neutral-400 font-bold uppercase">
+                      <span>Negative Prompt (O que evitar)</span>
+                      <button
+                        onClick={() => handleCopyText(generatedMapPrompt.negativePrompt, "neg")}
+                        className="text-neutral-400 hover:text-neutral-200 flex items-center gap-0.5"
+                      >
+                        {copiedField === "neg" ? "Copiado!" : "Copiar"}
+                      </button>
+                    </div>
+                    <div className="bg-neutral-950/60 p-2 rounded-xl border border-neutral-800 text-red-300/80 font-mono text-[10px]">
+                      {generatedMapPrompt.negativePrompt}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Footer */}
+                <div className="pt-2 border-t border-neutral-800 flex items-center justify-between">
+                  <span className="text-[10px] text-neutral-400">
+                    💡 Cole este prompt no Midjourney, DALL-E, Bing Image Creator ou Leonardo.ai!
+                  </span>
+                  <button
+                    onClick={() => {
+                      onSendToChat(
+                        `[Prompt de Mapa Top-Down para IA]:\n**${generatedMapPrompt.title}**\n\n\`${generatedMapPrompt.englishPrompt}\``,
+                        "ai"
+                      );
+                      rpgAudio.playMagicSpell();
+                    }}
+                    className="px-3.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Enviar para o Chat
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-16 text-xs text-neutral-500 space-y-2">
+                <Map className="w-8 h-8 text-neutral-700 mx-auto" />
+                <p className="font-semibold text-neutral-400">Gerador de Prompts de Mapa de Batalha (Top-Down)</p>
+                <p className="max-w-xs mx-auto text-neutral-500 text-[11px]">
+                  Escolha um preset ao lado ou digite seu tema para gerar prompts profissionais otimizados para Midjourney, DALL-E e Stable Diffusion.
+                </p>
               </div>
             )}
           </div>
