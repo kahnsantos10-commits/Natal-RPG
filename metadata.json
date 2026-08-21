@@ -1,0 +1,8 @@
+{
+  "name": "Natal-RPG",
+  "description": "Sistema de RPG Dual (Mesa Presencial/Fora com Telão e Pistas Impressas + Mesa Virtual/Dentro com VTT e IA) - Suporta Ordem Paranormal, D&D 5e e Sistemas Livres.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
