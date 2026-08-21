@@ -178,10 +178,18 @@ export function App() {
   const [roomName, setRoomName] = useState("Sessão Principal de RPG");
   const [system, setSystem] = useState<RPGSystem>("ordem");
   const [userRole, setUserRole] = useState<UserRole>("gm");
-  const [userName, setUserName] = useState("Mestre de Jogo");
-  const [copiedLink, setCopiedLink] = useState(false);
+  const [userName, setUserName] = useState<string>("Mestre");
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  // Read-only mode detection
+  const [isReadOnly, setIsReadOnly] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("readonly") === "true") {
+      setIsReadOnly(true);
+    }
+  }, []);
 
-  // Authentication Login Screen State
+  // ... (inside the return statement, pass readOnly={isReadOnly} to BattleMap)
   const [showLoginScreen, setShowLoginScreen] = useState(false);
   const [activeRevealedHandout, setActiveRevealedHandout] = useState<any | undefined>(undefined);
 
@@ -1130,6 +1138,7 @@ export function App() {
                 onUndo={handleUndo}
                 canUndo={undoStack.length > 0}
                 onSaveSnapshot={pushUndoSnapshot}
+                onFallbackTo2D={() => setMapViewMode("2d")}
               />
             ) : (
               <BattleMap

@@ -19,7 +19,8 @@ import {
   BookOpen,
   Palette,
   Crosshair,
-  Award
+  Award,
+  Upload
 } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
 
@@ -710,13 +711,34 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
                   ))}
                 </div>
 
-                <input
-                  type="url"
-                  value={avatarUrl}
-                  onChange={(e) => setAvatarUrl(e.target.value)}
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-2xl px-4 py-2.5 text-xs font-mono text-neutral-200 focus:outline-none focus:border-amber-500"
-                  placeholder="Ou cole a URL de imagem personalizada..."
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={avatarUrl}
+                    onChange={(e) => setAvatarUrl(e.target.value)}
+                    placeholder="Cole a URL da imagem ou faça upload..."
+                    className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+                  />
+                  <label className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 flex-shrink-0 transition-colors">
+                    <Upload className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Upload</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            if (event.target?.result) setAvatarUrl(event.target.result as string);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -761,10 +783,22 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
                       Grande (2x2)
                     </button>
                   </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-neutral-300 block mb-1.5">
+                    Modelo 3D do Token
+                  </label>
+                  <button
+                    onClick={() => alert("Funcionalidade de modelagem 3D em desenvolvimento!")}
+                    className="w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-bold border border-neutral-700 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Gerar Modelo 3D (IA)</span>
+                  </button>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
           {step === 4 && (
             <div className="space-y-4 animate-in fade-in duration-150">
@@ -797,8 +831,6 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
             </div>
           )}
         </div>
-
-        {/* Modal Footer Controls */}
         <div className="px-6 py-4 bg-neutral-950 border-t border-neutral-800 flex items-center justify-between">
           <button
             onClick={() => setStep((s) => Math.max(1, s - 1) as any)}

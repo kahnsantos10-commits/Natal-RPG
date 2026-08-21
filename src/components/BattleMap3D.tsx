@@ -23,6 +23,7 @@ import {
   Volume2
 } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
+import { BattleMap } from "./BattleMap";
 
 interface BattleMap3DProps {
   map: MapData;
@@ -36,6 +37,7 @@ interface BattleMap3DProps {
   onUndo?: () => void;
   canUndo?: boolean;
   onSaveSnapshot?: (description: string) => void;
+  onFallbackTo2D?: () => void;
 }
 
 export const BattleMap3D: React.FC<BattleMap3DProps> = ({
@@ -50,8 +52,13 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
   onUndo,
   canUndo,
   onSaveSnapshot,
+  onFallbackTo2D,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
+
+  // 2D Fallback State
+  const [fallbackTriggered, setFallbackTriggered] = useState(false);
+  const [fallbackReason, setFallbackReason] = useState("");
 
   // FPV Mode State
   const [isFirstPerson, setIsFirstPerson] = useState(false);
@@ -132,8 +139,32 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isFirstPerson, selectedTokenId, tokens]);
 
+  // 1. Check WebGL support on mount
+  useEffect(() => {
+    const checkWebGL = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        return !!(
+          window.WebGLRenderingContext &&
+          (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
+        );
+      } catch (e) {
+        return false;
+      }
+    };
+
+    if (!checkWebGL()) {
+      setFallbackReason("Seu dispositivo ou navegador não suporta aceleração gráfica 3D (WebGL).");
+      setFallbackTriggered(true);
+      if (onFallbackTo2D) {
+        onFallbackTo2D();
+      }
+    }
+  }, [onFallbackTo2D]);
+
   // Three.js Render Loop
   useEffect(() => {
+    if (fallbackTriggered) return;
     if (!mountRef.current) return;
 
     const container = mountRef.current;
@@ -151,7 +182,19 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     cameraRef.current = camera;
 
     // 3. Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch (err) {
+      console.error("WebGL Renderer creation failed:", err);
+      setFallbackReason("Falha ao inicializar o renderizador 3D do mapa. Seu dispositivo pode estar sem memória de vídeo.");
+      setFallbackTriggered(true);
+      if (onFallbackTo2D) {
+        onFallbackTo2D();
+      }
+      return;
+    }
+
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
@@ -319,6 +362,14 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     let animId: number;
     const clock = new THREE.Clock();
 
+    // FPS Detection tracking variables
+    let frameCount = 0;
+    let lastTime = performance.now();
+    const warmupEndTime = performance.now() + 2500; // 2.5s warmup
+    let consecutiveLowFps = 0;
+    const LOW_FPS_THRESHOLD = 20; // FPS below 20 is low performance
+    const CONSECUTIVE_LOW_THRESHOLD = 3; // Trigger after 3 samples of low performance
+
     const animate = () => {
       animId = requestAnimationFrame(animate);
       const elapsedTime = clock.getElapsedTime();
@@ -356,6 +407,32 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
       }
 
       renderer.render(scene, camera);
+
+      // --- Performance Monitoring ---
+      const now = performance.now();
+      frameCount++;
+      if (now - lastTime >= 1000) {
+        const fps = (frameCount * 1000) / (now - lastTime);
+        frameCount = 0;
+        lastTime = now;
+
+        // Perform check only after warm-up
+        if (now > warmupEndTime) {
+          if (fps < LOW_FPS_THRESHOLD) {
+            consecutiveLowFps++;
+            if (consecutiveLowFps >= CONSECUTIVE_LOW_THRESHOLD) {
+              console.warn(`[BattleMap3D] Low performance detected: ${fps.toFixed(1)} FPS. Activating 2D Fallback.`);
+              setFallbackReason(`Baixo desempenho de renderização detectado (${fps.toFixed(0)} FPS). Alternando para o mapa 2D...`);
+              setFallbackTriggered(true);
+              if (onFallbackTo2D) {
+                onFallbackTo2D();
+              }
+            }
+          } else {
+            consecutiveLowFps = 0;
+          }
+        }
+      }
     };
 
     animate();
@@ -367,7 +444,7 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
       }
       renderer.dispose();
     };
-  }, [map, tokens, cellElevations, isFirstPerson, selectedTokenId, selectedToken?.x, selectedToken?.y, selectedToken?.z, fpYaw, fpPitch, orbitAngle, orbitPitch, orbitDistance, currentTurnTokenId]);
+  }, [map, tokens, cellElevations, isFirstPerson, selectedTokenId, selectedToken?.x, selectedToken?.y, selectedToken?.z, fpYaw, fpPitch, orbitAngle, orbitPitch, orbitDistance, currentTurnTokenId, fallbackTriggered, onFallbackTo2D]);
 
   // Handle Mouse Zoom on Orbit Mode
   const handleWheel = (e: React.WheelEvent) => {
@@ -482,6 +559,40 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     setCellElevations((prev) => ({ ...prev, [cellKey]: targetElev }));
     rpgAudio.playTokenMove();
   };
+
+  if (fallbackTriggered) {
+    return (
+      <div className="relative w-full h-full bg-neutral-950">
+        <BattleMap
+          map={map}
+          tokens={tokens}
+          system={system}
+          userRole={userRole}
+          currentTurnTokenId={currentTurnTokenId}
+          onUpdateTokens={onUpdateTokens}
+          onUpdateMap={onUpdateMap}
+          onSelectTokenForRoll={onSelectTokenForRoll}
+          onUndo={onUndo}
+          canUndo={canUndo}
+          onSaveSnapshot={onSaveSnapshot}
+        />
+        {/* Floating absolute performance/fallback toast banner */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 bg-neutral-900/95 border border-amber-500/50 p-4 rounded-2xl max-w-md shadow-2xl flex items-center gap-3 animate-bounce backdrop-blur-md">
+          <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center flex-shrink-0">
+            <Sparkles className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-left">
+            <div className="text-xs font-extrabold text-neutral-100 uppercase tracking-wide">
+              Modo 2D de Compatibilidade
+            </div>
+            <div className="text-[11px] text-neutral-400">
+              {fallbackReason || "Baixo desempenho detectado! Usando o mapa 2D para garantir fluidez."}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full h-full bg-neutral-950 overflow-hidden select-none flex flex-col">
