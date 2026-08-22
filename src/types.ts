@@ -385,6 +385,7 @@ export interface RoomState {
   history: SessionHistoryEvent[];
   createdAt: number;
   lastUpdated: number;
+  version?: number;
 }
 
 export type RoomData = RoomState;

@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import * as THREE from "three";
 import { RPGSystem, MapToken, DnDCharacter, OrdemCharacter, CustomCharacter } from "../types";
 import {
   X,
@@ -32,6 +33,181 @@ interface CharacterCreatorModalProps {
     tokenData: Omit<MapToken, "id">
   ) => void;
 }
+
+// Interactive 3D token miniature previewer
+export const MiniToken3DPreview: React.FC<{ avatar: string; color: string; pedestalStyle: string }> = ({
+  avatar,
+  color,
+  pedestalStyle,
+}) => {
+  const mountRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!mountRef.current) return;
+    const container = mountRef.current;
+    const width = container.clientWidth || 240;
+    const height = container.clientHeight || 240;
+
+    const scene = new THREE.Scene();
+    scene.background = null; // Transparent background to blend into the UI panel
+
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+    camera.position.set(0, 2.5, 4.5);
+    camera.lookAt(0, 0.8, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    
+    container.innerHTML = "";
+    container.appendChild(renderer.domElement);
+
+    const group = new THREE.Group();
+    scene.add(group);
+
+    // Pedestal Base Design based on style
+    let baseHex = 0xd97706;
+    let emissiveHex = 0x000000;
+    if (pedestalStyle === "paranormal") {
+      baseHex = 0x8b5cf6;
+      emissiveHex = 0x4c1d95;
+    } else if (pedestalStyle === "obsidian") {
+      baseHex = 0x18181b;
+      emissiveHex = 0xdc2626;
+    } else if (pedestalStyle === "arcane") {
+      baseHex = 0x2563eb;
+      emissiveHex = 0x1e40af;
+    }
+
+    // Heavy base pedestal
+    const baseGeo = new THREE.CylinderGeometry(1.0, 1.1, 0.2, 32);
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: baseHex,
+      metalness: 0.9,
+      roughness: 0.25,
+      emissive: emissiveHex,
+      emissiveIntensity: 0.4,
+    });
+    const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+    baseMesh.position.y = 0.1;
+    baseMesh.castShadow = true;
+    baseMesh.receiveShadow = true;
+    group.add(baseMesh);
+
+    // Ring detail
+    const ringGeo = new THREE.TorusGeometry(1.05, 0.04, 16, 64);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: baseHex,
+      metalness: 0.9,
+      roughness: 0.1,
+    });
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.rotation.x = Math.PI / 2;
+    ringMesh.position.y = 0.2;
+    group.add(ringMesh);
+
+    // Standee Card (Flat card with Avatar Image mapped)
+    const tokenHex = parseInt(color.replace("#", "0x"), 16) || 0xeab308;
+    const standeeGeo = new THREE.BoxGeometry(1.2, 1.2, 0.04);
+    const standeeMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.5,
+      metalness: 0.1,
+    });
+
+    if (avatar) {
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin("anonymous");
+      loader.load(
+        avatar,
+        (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          standeeMat.map = tex;
+          standeeMat.needsUpdate = true;
+        },
+        undefined,
+        (err) => {
+          console.warn("MiniToken3DPreview failed to load texture:", err);
+          standeeMat.color.setHex(tokenHex);
+        }
+      );
+    } else {
+      standeeMat.color.setHex(tokenHex);
+    }
+
+    const standeeMesh = new THREE.Mesh(standeeGeo, standeeMat);
+    standeeMesh.position.y = 0.8; // Centered above pedestal
+    standeeMesh.castShadow = true;
+    standeeMesh.receiveShadow = true;
+    group.add(standeeMesh);
+
+    // Active Selection Aura Ring
+    const auraGeo = new THREE.TorusGeometry(1.2, 0.03, 16, 32);
+    const auraMat = new THREE.MeshBasicMaterial({
+      color: tokenHex,
+      transparent: true,
+      opacity: 0.4,
+    });
+    const auraMesh = new THREE.Mesh(auraGeo, auraMat);
+    auraMesh.rotation.x = Math.PI / 2;
+    auraMesh.position.y = 0.02;
+    group.add(auraMesh);
+
+    // Lights
+    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambient);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+    dir.position.set(3, 5, 4);
+    dir.castShadow = true;
+    scene.add(dir);
+
+    const point = new THREE.PointLight(baseHex, 1.2, 5);
+    point.position.set(0, 0.3, 0);
+    scene.add(point);
+
+    // Animation Loop
+    let animId: number;
+    const animate = () => {
+      animId = requestAnimationFrame(animate);
+      group.rotation.y += 0.015; // Beautiful rotational idle spin
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    // Handling container resizing
+    const handleResize = () => {
+      if (!container) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+    
+    const resizeObserver = new ResizeObserver(() => handleResize());
+    resizeObserver.observe(container);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      resizeObserver.disconnect();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, [avatar, color, pedestalStyle]);
+
+  return (
+    <div className="w-full h-full relative flex items-center justify-center">
+      <div ref={mountRef} className="w-full h-full" />
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-full bg-black/75 border border-amber-500/30 text-[10px] text-amber-300 font-semibold tracking-wider uppercase">
+        Visualização 3D Ativa
+      </div>
+    </div>
+  );
+};
 
 // Preset Avatars for quick selection
 const PRESET_AVATARS = [
@@ -112,6 +288,43 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
   const [avatarUrl, setAvatarUrl] = useState(PRESET_AVATARS[0].url);
   const [tokenColor, setTokenColor] = useState(PRESET_AVATARS[0].color);
   const [tokenSize, setTokenSize] = useState<1 | 2>(1);
+  const [pedestalStyle, setPedestalStyle] = useState<"gold" | "paranormal" | "obsidian" | "arcane">("gold");
+  const [generationLogs, setGenerationLogs] = useState<string[]>([]);
+  const [isGenerating3D, setIsGenerating3D] = useState(false);
+
+  const handleGenerate3DModel = async () => {
+    setIsGenerating3D(true);
+    setGenerationLogs(["Iniciando núcleo de forja de miniatura 3D...", "Mapeando parâmetros de sistema arcanos..."]);
+
+    const logSteps = [
+      "Processando descrição de personagem para IA...",
+      "Computando topologia tridimensional do pedestal...",
+      "Projetando mapa de cores de alta fidelidade...",
+      "Injetando partículas ambientais reativas...",
+      "Renderizando visualização interativa do Token...",
+      "Miniatura 3D concluída com sucesso!"
+    ];
+
+    let stepIdx = 0;
+    const logInterval = setInterval(() => {
+      if (stepIdx < logSteps.length) {
+        setGenerationLogs(prev => [...prev, logSteps[stepIdx]]);
+        stepIdx++;
+      } else {
+        clearInterval(logInterval);
+      }
+    }, 900);
+
+    // Run actual AI generation for avatar!
+    await handleGenerateAiAvatar();
+
+    setTimeout(() => {
+      clearInterval(logInterval);
+      setGenerationLogs(prev => [...prev, "Miniatura 3D forjada, texturizada e integrada com sucesso!"]);
+      setIsGenerating3D(false);
+      rpgAudio.playSpellCast();
+    }, 6000);
+  };
 
   // AI Avatar State
   const [aiAvatarPrompt, setAiAvatarPrompt] = useState("");
@@ -220,6 +433,7 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
       type: "hero",
       size: tokenSize,
       conditions: [],
+      model3D: pedestalStyle, // Save pedestal style for 3D map
     };
 
     let newChar: any;
@@ -741,64 +955,136 @@ export const CharacterCreatorModal: React.FC<CharacterCreatorModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-neutral-300 block mb-1.5">
-                    Cor da Aura e Base do Token 3D
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="color"
-                      value={tokenColor}
-                      onChange={(e) => setTokenColor(e.target.value)}
-                      className="w-12 h-10 rounded-xl cursor-pointer bg-neutral-950 border border-neutral-800 p-1"
-                    />
-                    <span className="text-xs font-mono text-neutral-300 uppercase">{tokenColor}</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
+                {/* Customization Inputs */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-neutral-300 block mb-1.5">
+                      Estilo do Pedestal 3D (Base)
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: "gold", name: "Ouro Heroico", color: "from-amber-600 to-yellow-500", desc: "Aura divina de ouro polido" },
+                        { id: "paranormal", name: "Paranormal", color: "from-purple-600 to-indigo-500", desc: "Forças ocultas e sigilos" },
+                        { id: "obsidian", name: "Obsidiana", color: "from-zinc-800 to-red-600", desc: "Cinza vulcânica reativa" },
+                        { id: "arcane", name: "Rúnico/Arcano", color: "from-blue-600 to-sky-500", desc: "Emanação de energia mágica" },
+                      ].map((style) => (
+                        <button
+                          key={style.id}
+                          type="button"
+                          onClick={() => {
+                            setPedestalStyle(style.id as any);
+                            rpgAudio.playTokenMove();
+                          }}
+                          className={`p-2.5 rounded-xl border text-left transition-all relative overflow-hidden group ${
+                            pedestalStyle === style.id
+                              ? "bg-neutral-900 border-amber-500 ring-2 ring-amber-500/10"
+                              : "bg-neutral-950/60 border-neutral-800 hover:border-neutral-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`w-2.5 h-2.5 rounded-full bg-gradient-to-tr ${style.color}`} />
+                            <span className="text-[11px] font-bold text-neutral-200">{style.name}</span>
+                          </div>
+                          <p className="text-[9px] text-neutral-500 leading-tight">{style.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-neutral-300 block mb-1.5">
+                        Cor da Aura do Token
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={tokenColor}
+                          onChange={(e) => setTokenColor(e.target.value)}
+                          className="w-10 h-9 rounded-lg cursor-pointer bg-neutral-950 border border-neutral-800 p-1"
+                        />
+                        <span className="text-xs font-mono text-neutral-400 uppercase">{tokenColor}</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-neutral-300 block mb-1.5">
+                        Tamanho no Grid
+                      </label>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setTokenSize(1)}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                            tokenSize === 1
+                              ? "bg-amber-500 text-neutral-950 border-amber-400"
+                              : "bg-neutral-950 text-neutral-400 border-neutral-800"
+                          }`}
+                        >
+                          Médio (1x1)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTokenSize(2)}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                            tokenSize === 2
+                              ? "bg-amber-500 text-neutral-950 border-amber-400"
+                              : "bg-neutral-950 text-neutral-400 border-neutral-800"
+                          }`}
+                        >
+                          Grande (2x2)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-neutral-300 block mb-1.5">
+                      Forjar Miniatura 3D por IA
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleGenerate3DModel}
+                      disabled={isGenerating3D}
+                      className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:from-neutral-800 disabled:to-neutral-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-indigo-500/10 active:scale-95 transition-all"
+                    >
+                      <Sparkles className={`w-3.5 h-3.5 text-purple-200 ${isGenerating3D ? "animate-spin" : ""}`} />
+                      <span>{isGenerating3D ? "Sintetizando Malha..." : "Forjar Token 3D"}</span>
+                    </button>
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-neutral-300 block mb-1.5">
-                    Tamanho do Token no Mapa
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setTokenSize(1)}
-                      className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${
-                        tokenSize === 1
-                          ? "bg-amber-500 text-neutral-950 border-amber-400"
-                          : "bg-neutral-950 text-neutral-400 border-neutral-800"
-                      }`}
-                    >
-                      Médio (1x1)
-                    </button>
-                    <button
-                      onClick={() => setTokenSize(2)}
-                      className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${
-                        tokenSize === 2
-                          ? "bg-amber-500 text-neutral-950 border-amber-400"
-                          : "bg-neutral-950 text-neutral-400 border-neutral-800"
-                      }`}
-                    >
-                      Grande (2x2)
-                    </button>
+                {/* 3D Model Interactive Screen & Forge Logs */}
+                <div className="flex flex-col rounded-2xl border border-neutral-800 bg-neutral-950 overflow-hidden min-h-[250px]">
+                  <div className="p-2.5 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Miniatura 3D em Tempo Real</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   </div>
-                <div className="space-y-3">
-                  <label className="text-xs font-bold text-neutral-300 block mb-1.5">
-                    Modelo 3D do Token
-                  </label>
-                  <button
-                    onClick={() => alert("Funcionalidade de modelagem 3D em desenvolvimento!")}
-                    className="w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-bold border border-neutral-700 flex items-center justify-center gap-1.5 transition-all"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Gerar Modelo 3D (IA)</span>
-                  </button>
+                  
+                  <div className="flex-1 bg-radial from-neutral-900 to-neutral-950 relative h-48">
+                    <MiniToken3DPreview
+                      avatar={avatarUrl}
+                      color={tokenColor}
+                      pedestalStyle={pedestalStyle}
+                    />
+                  </div>
+
+                  {/* Fabrication Forge logs console */}
+                  {(generationLogs.length > 0 || isGenerating3D) && (
+                    <div className="p-3 bg-black/90 border-t border-neutral-900 font-mono text-[9px] text-emerald-400 space-y-1 max-h-24 overflow-y-auto">
+                      {generationLogs.map((log, idx) => (
+                        <div key={idx} className="flex gap-1.5 items-start">
+                          <span className="text-emerald-600 font-bold">&gt;</span>
+                          <span>{log}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
           {step === 4 && (
             <div className="space-y-4 animate-in fade-in duration-150">

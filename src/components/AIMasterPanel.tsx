@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { RPGSystem, MapToken } from "../types";
+import { RPGSystem, MapToken, MapData } from "../types";
 import {
   Sparkles,
   Send,
@@ -19,7 +19,8 @@ import {
   Copy,
   Check,
   Layers,
-  Sparkle
+  Sparkle,
+  Image as ImageIcon
 } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
 
@@ -27,6 +28,8 @@ interface AIMasterPanelProps {
   system: RPGSystem;
   onSendToChat: (message: string, role?: "ai" | "gm" | "system") => void;
   onAddTokenToMap?: (token: MapToken) => void;
+  onAddMap?: (map: MapData) => void;
+  onSelectMap?: (map: MapData) => void;
   activeCharacterName?: string;
 }
 
@@ -34,6 +37,8 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
   system,
   onSendToChat,
   onAddTokenToMap,
+  onAddMap,
+  onSelectMap,
   activeCharacterName,
 }) => {
   const [activeTab, setActiveTab] = useState<"narrative" | "npc" | "encounter" | "map_prompt">("narrative");
@@ -67,6 +72,8 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
   const [mapCustom, setMapCustom] = useState("");
   const [generatedMapPrompt, setGeneratedMapPrompt] = useState<any | null>(null);
   const [isLoadingMapPrompt, setIsLoadingMapPrompt] = useState(false);
+  const [isGeneratingMapImage, setIsGeneratingMapImage] = useState(false);
+  const [mapGenerationLog, setMapGenerationLog] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Handle Narrative Request
@@ -167,6 +174,92 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
       console.error("Map prompt generation error:", err);
     } finally {
       setIsLoadingMapPrompt(false);
+    }
+  };
+
+  const handleCreateAndAddMap = async () => {
+    if (!generatedMapPrompt) return;
+    setIsGeneratingMapImage(true);
+    setMapGenerationLog("🎨 Iniciando canal de síntese com a IA artística...");
+    rpgAudio.playMagicSpell();
+
+    try {
+      const finalPromptToGen = generatedMapPrompt.englishPrompt || `RPG battlemap top-down view, ${mapTheme}`;
+      
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: finalPromptToGen,
+          type: "map",
+          system,
+        }),
+      });
+
+      let finalBgUrl = "";
+      if (res.ok) {
+        const data = await res.json();
+        if (data.imageUrl) {
+          finalBgUrl = data.imageUrl;
+          setMapGenerationLog("✨ Imagem gerada com perfeição técnica!");
+        }
+      }
+
+      // Fallback if key missing/error
+      if (!finalBgUrl) {
+        setMapGenerationLog("🔄 Canal principal instável. Ativando síntese alternativa de redundância...");
+        const seed = Math.floor(Math.random() * 1000000);
+        const encoded = encodeURIComponent(`RPG battlemap top-down view ${finalPromptToGen}`);
+        finalBgUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&seed=${seed}&nologo=true`;
+      }
+
+      // Process grid size
+      let width = 20;
+      let height = 16;
+      if (generatedMapPrompt.suggestedGridSize) {
+        const parts = generatedMapPrompt.suggestedGridSize.match(/\d+/g);
+        if (parts && parts.length >= 2) {
+          const cols = parseInt(parts[0], 10);
+          const rows = parseInt(parts[1], 10);
+          if (!isNaN(cols) && cols > 0) {
+            width = cols;
+            height = rows || cols;
+          }
+        }
+      }
+
+      // Create MapData
+      const newMap: MapData = {
+        id: `map-ai-${Date.now()}`,
+        name: generatedMapPrompt.title || "Mapa Gerado por IA",
+        gridWidth: width,
+        gridHeight: height,
+        gridSize: 50,
+        gridType: "square",
+        bgUrl: finalBgUrl,
+        lighting: generatedMapPrompt.recommendedLighting || "Estática",
+        fogOfWar: false,
+        revealedCells: [],
+        drawings: [],
+        pings: [],
+      };
+
+      if (onAddMap) {
+        onAddMap(newMap);
+      }
+      if (onSelectMap) {
+        onSelectMap(newMap);
+      }
+
+      setMapGenerationLog("✅ Mapa adicionado com sucesso à mesa de batalha em 2D e 3D!");
+      onSendToChat(`[Mestre IA]: Gerou e ativou um novo Mapa de Batalha 2D/3D: **${newMap.name}**! Prontinho para colocar os tokens e começar o combate!`, "system");
+      rpgAudio.playMagicSpell();
+    } catch (err) {
+      console.error(err);
+      setMapGenerationLog("❌ Falha crítica ao gerar o mapa.");
+    } finally {
+      setIsGeneratingMapImage(false);
+      setTimeout(() => setMapGenerationLog(null), 5000);
     }
   };
 
@@ -761,6 +854,42 @@ export const AIMasterPanel: React.FC<AIMasterPanelProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* 2D & 3D MAP SYNTHESIS CTA */}
+                <div className="bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/25 p-3 rounded-2xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-bold text-amber-400 block">Síntese de Arena 2D/3D Integrada</span>
+                      <span className="text-[9px] text-neutral-400 block leading-tight">Gere a imagem real do mapa e ative o tabuleiro imediatamente</span>
+                    </div>
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                  </div>
+                  
+                  {mapGenerationLog && (
+                    <div className="bg-neutral-950 px-2 py-1.5 rounded-lg border border-neutral-850 text-[9px] text-amber-300 font-mono animate-pulse">
+                      {mapGenerationLog}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleCreateAndAddMap}
+                    disabled={isGeneratingMapImage}
+                    className="w-full py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {isGeneratingMapImage ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Sintetizando Cenário...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ImageIcon className="w-3.5 h-3.5" />
+                        <span>Gerar Cenário & Ativar Tabuleiro 2D/3D</span>
+                      </>
+                    )}
+                  </button>
+                </div>
 
                 {/* Action Footer */}
                 <div className="pt-2 border-t border-neutral-800 flex items-center justify-between">

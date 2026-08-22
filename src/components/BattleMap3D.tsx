@@ -171,10 +171,38 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // 1. Scene setup
+    // 1. Scene setup based on map lighting/atmosphere
+    let ambientColor = 0xffffff;
+    let ambientIntensity = 0.65;
+    let dirColor = 0xfef08a;
+    let dirIntensity = 1.3;
+    let fogColor = 0x0a0b10;
+    let fogDensity = isFirstPerson ? 0.03 : 0.012;
+
+    if (map.lighting === "dim") {
+      ambientColor = 0xcc8855; // warm candlelight tint
+      ambientIntensity = 0.45;
+      dirColor = 0xffaa66;
+      dirIntensity = 0.75;
+      fogColor = 0x140e0b;
+    } else if (map.lighting === "dark") {
+      ambientColor = 0x222255; // deep midnight blue
+      ambientIntensity = 0.25;
+      dirColor = 0x3b82f6; // cool moonlight
+      dirIntensity = 0.35;
+      fogColor = 0x030308;
+    } else if (map.lighting === "paranormal_fog") {
+      ambientColor = 0x114422; // ghostly green glow
+      ambientIntensity = 0.4;
+      dirColor = 0x10b981; // emerald dir light
+      dirIntensity = 0.65;
+      fogColor = 0x041008;
+      fogDensity = isFirstPerson ? 0.05 : 0.025; // denser fog
+    }
+
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0b10);
-    scene.fog = new THREE.FogExp2(0x0a0b10, isFirstPerson ? 0.03 : 0.012);
+    scene.background = new THREE.Color(fogColor);
+    scene.fog = new THREE.FogExp2(fogColor, fogDensity);
     sceneRef.current = scene;
 
     // 2. Camera setup
@@ -204,10 +232,10 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     container.appendChild(renderer.domElement);
 
     // 4. Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+    const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xfef08a, 1.3);
+    const dirLight = new THREE.DirectionalLight(dirColor, dirIntensity);
     dirLight.position.set(18, 32, 22);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -223,6 +251,52 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
     const gridW = map.gridWidth || 20;
     const gridH = map.gridHeight || 20;
 
+    // Render Ground Plane with Map Texture or fallback Grid
+    const groundGeo = new THREE.PlaneGeometry(gridW, gridH);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0x999999,
+      roughness: 0.8,
+      metalness: 0.1,
+      side: THREE.DoubleSide
+    });
+
+    if (map.bgUrl) {
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin("anonymous");
+      loader.load(
+        map.bgUrl,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          groundMat.map = texture;
+          groundMat.color.setHex(0xffffff); // Clear base color tint
+          groundMat.needsUpdate = true;
+        },
+        undefined,
+        (err) => {
+          console.warn("Failed to load map texture in 3D, using default terrain:", err);
+        }
+      );
+    } else {
+      // Fallback elegant deep indigo space grid background
+      groundMat.color.setHex(0x111827);
+    }
+
+    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.position.set(0, -0.01, 0); // slightly below 0 so tokens/pillars sit nicely on top
+    groundMesh.receiveShadow = true;
+    worldGroup.add(groundMesh);
+
+    // Tactical Grid Helper Overlay on top of map texture
+    const gridHelper = new THREE.GridHelper(gridW, gridW, 0xffffff, 0x444444);
+    gridHelper.position.set(0, 0.01, 0);
+    if (gridHelper.material) {
+      const gMat = gridHelper.material as THREE.Material;
+      gMat.transparent = true;
+      gMat.opacity = 0.35;
+    }
+    worldGroup.add(gridHelper);
+
     // Render Tiles & Relief Heights
     tilesMeshMapRef.current.clear();
     torchLightsRef.current = [];
@@ -232,6 +306,12 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
         const cellKey = `${x},${y}`;
         const hLevel = cellElevations[cellKey] || 0;
         const cellY = hLevel * 0.8;
+
+        // Skip rendering charcoal boxes for flat ground (hLevel === 0)
+        // so that the beautiful map image is completely visible!
+        if (hLevel === 0) {
+          continue;
+        }
 
         const tileHeight = Math.max(0.2, hLevel > 0 ? hLevel * 0.8 + 0.2 : 0.2);
         const boxGeo = new THREE.BoxGeometry(0.96, tileHeight, 0.96);
@@ -246,6 +326,8 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
           color: tileColor,
           roughness: hLevel < 0 ? 0.1 : 0.6,
           metalness: hLevel < 0 ? 0.8 : 0.2,
+          transparent: hLevel < 0,
+          opacity: hLevel < 0 ? 0.75 : 1.0,
         });
 
         const tileMesh = new THREE.Mesh(boxGeo, tileMat);
@@ -310,38 +392,74 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
         tokenGroup.add(beamMesh);
       }
 
+      // Pedestal Base based on tok.model3D pedestal style
+      let baseHex = tokHex;
+      let emissiveHex = 0x000000;
+      let metalnessVal = 0.8;
+      let roughnessVal = 0.2;
+
+      const pStyle = tok.model3D || "gold";
+      if (pStyle === "paranormal") {
+        baseHex = 0x8b5cf6;
+        emissiveHex = 0x4c1d95;
+      } else if (pStyle === "obsidian") {
+        baseHex = 0x18181b;
+        emissiveHex = 0xdc2626;
+      } else if (pStyle === "arcane") {
+        baseHex = 0x2563eb;
+        emissiveHex = 0x1e40af;
+      } else if (pStyle === "gold" || !tok.model3D) {
+        baseHex = 0xd97706; // Gorgeous rich amber gold
+        emissiveHex = 0x78350f;
+      }
+
       // Pedestal Base
       const baseGeo = new THREE.CylinderGeometry(0.42, 0.45, 0.16, 24);
       const baseMat = new THREE.MeshStandardMaterial({
-        color: tokHex,
-        roughness: 0.2,
-        metalness: 0.8,
-        emissive: tokHex,
-        emissiveIntensity: isTurn ? 0.6 : isSelected ? 0.4 : 0.1,
+        color: baseHex,
+        roughness: roughnessVal,
+        metalness: metalnessVal,
+        emissive: emissiveHex,
+        emissiveIntensity: isTurn ? 0.8 : isSelected ? 0.5 : 0.2,
       });
       const baseMesh = new THREE.Mesh(baseGeo, baseMat);
       baseMesh.position.y = 0.08;
       baseMesh.castShadow = true;
       tokenGroup.add(baseMesh);
 
-      // Figurative Token Cylinder Body
-      const bodyGeo = new THREE.CylinderGeometry(0.32, 0.35, 0.9, 24);
-      const bodyMat = new THREE.MeshStandardMaterial({
-        color: tokHex,
-        roughness: 0.4,
-        metalness: 0.3,
+      // Token Standee Card (Thin card displaying the actual Avatar Artwork)
+      const cardGeo = new THREE.BoxGeometry(0.72, 0.72, 0.04);
+      const cardMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.5,
+        metalness: 0.1,
       });
-      const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-      bodyMesh.position.y = 0.6;
-      bodyMesh.castShadow = true;
-      tokenGroup.add(bodyMesh);
 
-      // Head sphere
-      const headGeo = new THREE.SphereGeometry(0.24, 16, 16);
-      const headMat = new THREE.MeshStandardMaterial({ color: tokHex });
-      const headMesh = new THREE.Mesh(headGeo, headMat);
-      headMesh.position.y = 1.12;
-      tokenGroup.add(headMesh);
+      if (tok.avatar) {
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin("anonymous");
+        loader.load(
+          tok.avatar,
+          (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            cardMat.map = texture;
+            cardMat.needsUpdate = true;
+          },
+          undefined,
+          (err) => {
+            console.warn("Failed to load token avatar texture in 3D:", err);
+            cardMat.color.setHex(tokHex);
+          }
+        );
+      } else {
+        cardMat.color.setHex(tokHex);
+      }
+
+      const cardMesh = new THREE.Mesh(cardGeo, cardMat);
+      cardMesh.position.y = 0.52; // Centered above pedestal
+      cardMesh.castShadow = true;
+      cardMesh.receiveShadow = true;
+      tokenGroup.add(cardMesh);
 
       // Active Selection or Turn Aura Ring
       if (isSelected || isTurn) {
@@ -353,6 +471,38 @@ export const BattleMap3D: React.FC<BattleMap3DProps> = ({
         ringMesh.rotation.x = Math.PI / 2;
         ringMesh.position.y = 0.18;
         tokenGroup.add(ringMesh);
+      }
+
+      // Floating Status Orbs for applied conditions
+      if (tok.conditions && tok.conditions.length > 0) {
+        tok.conditions.forEach((cond, idx) => {
+          const orbGeo = new THREE.SphereGeometry(0.06, 12, 12);
+          const colors: Record<string, number> = {
+            sangrando: 0xef4444,
+            atordoado: 0xf59e0b,
+            abençoado: 0x10b981,
+            abencoado: 0x10b981,
+            envenenado: 0xa855f7,
+            caído: 0x6b7280,
+            caido: 0x6b7280,
+            invisível: 0x3b82f6,
+            invisivel: 0x3b82f6,
+          };
+          const orbColor = colors[cond.toLowerCase()] || 0xeab308;
+          const orbMat = new THREE.MeshStandardMaterial({
+            color: orbColor,
+            roughness: 0.1,
+            metalness: 0.9,
+            emissive: orbColor,
+            emissiveIntensity: 0.8
+          });
+          const orbMesh = new THREE.Mesh(orbGeo, orbMat);
+          
+          // Position them orbiting above the card standee (around Y = 0.98)
+          const angle = (idx / tok.conditions.length) * Math.PI * 2;
+          orbMesh.position.set(Math.cos(angle) * 0.32, 0.98, Math.sin(angle) * 0.32);
+          tokenGroup.add(orbMesh);
+        });
       }
 
       worldGroup.add(tokenGroup);

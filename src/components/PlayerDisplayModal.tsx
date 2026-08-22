@@ -18,8 +18,10 @@ import {
   Heart,
   Brain,
   Shield,
-  Volume2
+  Volume2,
+  Wifi
 } from "lucide-react";
+import { RokuCastPanel } from "./RokuCastPanel";
 
 interface PlayerDisplayModalProps {
   system: RPGSystem;
@@ -34,6 +36,7 @@ interface PlayerDisplayModalProps {
     author?: string;
     dateOrEra?: string;
   } | null;
+  availableMaps?: MapData[];
   onClose: () => void;
 }
 
@@ -44,10 +47,12 @@ export const PlayerDisplayModal: React.FC<PlayerDisplayModalProps> = ({
   combatants,
   currentTurnIndex,
   revealedHandout,
+  availableMaps = [],
   onClose,
 }) => {
   const [activeView, setActiveView] = useState<"map" | "handout" | "combat">("map");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showRokuCast, setShowRokuCast] = useState(false);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -120,6 +125,18 @@ export const PlayerDisplayModal: React.FC<PlayerDisplayModalProps> = ({
 
         {/* Right Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <button
+            onClick={() => setShowRokuCast(!showRokuCast)}
+            className={`p-1.5 border rounded-lg transition-all flex items-center gap-1 text-xs font-bold ${
+              showRokuCast
+                ? "bg-amber-500 border-amber-400 text-neutral-950 shadow shadow-amber-500/20"
+                : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-amber-300"
+            }`}
+            title="Transmitir para o Roku TV"
+          >
+            <Wifi className={`w-3.5 h-3.5 ${showRokuCast ? "animate-pulse" : ""}`} />
+            <span className="hidden md:inline">Transmitir Roku</span>
+          </button>
           <button
             onClick={toggleFullscreen}
             className="p-1.5 bg-neutral-900 border border-neutral-800 rounded-lg text-neutral-400 hover:text-white transition-colors"
@@ -298,6 +315,21 @@ export const PlayerDisplayModal: React.FC<PlayerDisplayModalProps> = ({
                 })}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Floating Roku Cast Panel Drawer */}
+        {showRokuCast && (
+          <div className="absolute top-3 right-3 z-40 max-h-[calc(100%-24px)] overflow-y-auto shadow-2xl animate-in slide-in-from-right-6 duration-200 bg-black/95 rounded-3xl">
+            <RokuCastPanel
+              system={system}
+              mapBgUrl={mapData.bgUrl || ""}
+              mapName={mapData.name}
+              handoutImageUrl={revealedHandout?.imageUrl}
+              handoutTitle={revealedHandout?.title}
+              availableMaps={availableMaps}
+              onClose={() => setShowRokuCast(false)}
+            />
           </div>
         )}
       </div>

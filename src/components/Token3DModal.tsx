@@ -20,8 +20,8 @@ export const Token3DModal: React.FC<Token3DModalProps> = ({ token, onClose, onUp
     if (!token || !mountRef.current || force2DFallback) return;
 
     const container = mountRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || 400;
+    const height = container.clientHeight || 450;
 
     try {
       // Scene, Camera, Renderer
@@ -86,18 +86,37 @@ export const Token3DModal: React.FC<Token3DModalProps> = ({ token, onClose, onUp
       ringMesh.position.y = 0.35;
       miniGroup.add(ringMesh);
 
-      // 2. Token Standee / Cylinder Figurine
+      // 2. Token Standee Card (Flat card with Avatar Image mapped)
       const tokenHexColor = parseInt((token.color || "#eab308").replace("#", "0x"), 16) || 0xeab308;
-      const standeeGeo = new THREE.CylinderGeometry(1.1, 1.1, 2.2, 32);
+      const standeeGeo = new THREE.BoxGeometry(1.8, 1.8, 0.08); // Width, Height, Depth (thin card)
       const standeeMat = new THREE.MeshStandardMaterial({
-        color: tokenHexColor,
-        roughness: 0.3,
-        metalness: 0.4,
-        emissive: tokenHexColor,
-        emissiveIntensity: 0.15,
+        color: 0xffffff,
+        roughness: 0.5,
+        metalness: 0.1,
       });
+
+      if (token.avatar) {
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin("anonymous");
+        loader.load(
+          token.avatar,
+          (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            standeeMat.map = texture;
+            standeeMat.needsUpdate = true;
+          },
+          undefined,
+          (err) => {
+            console.warn("Failed to load avatar texture onto 3D standee:", err);
+            standeeMat.color.setHex(tokenHexColor);
+          }
+        );
+      } else {
+        standeeMat.color.setHex(tokenHexColor);
+      }
+
       const standeeMesh = new THREE.Mesh(standeeGeo, standeeMat);
-      standeeMesh.position.y = 1.45;
+      standeeMesh.position.y = 1.25; // Centered above the pedestal
       standeeMesh.castShadow = true;
       standeeMesh.receiveShadow = true;
       miniGroup.add(standeeMesh);
@@ -216,18 +235,19 @@ export const Token3DModal: React.FC<Token3DModalProps> = ({ token, onClose, onUp
       animate();
 
       const handleResize = () => {
-        if (!mountRef.current) return;
-        const w = mountRef.current.clientWidth;
-        const h = mountRef.current.clientHeight;
+        if (!container) return;
+        const w = container.clientWidth || 400;
+        const h = container.clientHeight || 450;
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
         renderer.setSize(w, h);
       };
 
-      window.addEventListener("resize", handleResize);
+      const resizeObserver = new ResizeObserver(() => handleResize());
+      resizeObserver.observe(container);
 
       return () => {
-        window.removeEventListener("resize", handleResize);
+        resizeObserver.disconnect();
         container.removeEventListener("mousedown", onMouseDown);
         window.removeEventListener("mousemove", onMouseMove);
         window.removeEventListener("mouseup", onMouseUp);

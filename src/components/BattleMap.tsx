@@ -807,6 +807,36 @@ export const BattleMap: React.FC<BattleMapProps> = ({
               </>
             )}
 
+            {/* Atmosphere / Lighting Selector */}
+            <div className="hidden lg:flex items-center gap-1 px-1.5 py-1 bg-neutral-950/40 border border-neutral-800 rounded-xl flex-shrink-0">
+              <span className="text-[9px] font-extrabold text-neutral-400 uppercase tracking-wider px-1">Atmosfera</span>
+              {[
+                { id: "bright", label: "☀️ Dia", title: "Iluminação Clara/Dia" },
+                { id: "dim", label: "🕯️ Penumbra", title: "Iluminação Suave/Velas" },
+                { id: "dark", label: "🌙 Noite", title: "Escuridão Total/Masmorra" },
+                { id: "paranormal_fog", label: "👻 Névoa", title: "Atmosfera Paranormal / Névoa" }
+              ].map((light) => {
+                const isActive = (map.lighting || "bright") === light.id;
+                return (
+                  <button
+                    key={light.id}
+                    onClick={() => {
+                      onUpdateMap({ lighting: light.id as any });
+                      rpgAudio.playMagicSpell();
+                    }}
+                    title={light.title}
+                    className={`px-1.5 py-0.5 rounded-lg text-[10px] font-extrabold transition-all ${
+                      isActive
+                        ? "bg-gradient-to-r from-amber-500 to-amber-600 text-neutral-950 shadow-sm"
+                        : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-850"
+                    }`}
+                  >
+                    {light.label}
+                  </button>
+                );
+              })}
+            </div>
+
             <button
               onClick={() => setShowAddTokenModal(true)}
               className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-neutral-950 font-semibold rounded-xl text-xs shadow transition-all whitespace-nowrap flex-shrink-0"
@@ -931,14 +961,35 @@ export const BattleMap: React.FC<BattleMapProps> = ({
             height: map.gridHeight * gridSize,
           }}
         >
-          {/* Background Map Image */}
+          {/* Background Map Image with Dynamic Atmospheric Filters */}
           {map.bgUrl && (
             <img
               src={map.bgUrl}
               alt="Cenário de Batalha"
-              className="absolute inset-0 w-full h-full object-cover pointer-events-none rounded-lg opacity-80"
+              className={`absolute inset-0 w-full h-full object-cover pointer-events-none rounded-lg transition-all duration-700 opacity-80 ${
+                map.lighting === "dim"
+                  ? "brightness-[0.7] contrast-[0.95] saturate-[0.85] sepia-[0.2]"
+                  : map.lighting === "dark"
+                  ? "brightness-[0.45] contrast-[1.1] saturate-[0.6] hue-rotate-[15deg]"
+                  : map.lighting === "paranormal_fog"
+                  ? "brightness-[0.6] contrast-[1.15] saturate-[1.1] sepia-[0.1] hue-rotate-[75deg]"
+                  : "brightness-95 contrast-100 saturate-100"
+              }`}
             />
           )}
+
+          {/* Ambient Lighting / Fog Tint Blend Overlay */}
+          <div
+            className={`absolute inset-0 pointer-events-none transition-all duration-700 mix-blend-multiply rounded-lg z-10 ${
+              map.lighting === "dim"
+                ? "bg-amber-900/15"
+                : map.lighting === "dark"
+                ? "bg-indigo-950/25"
+                : map.lighting === "paranormal_fog"
+                ? "bg-emerald-950/20 animate-pulse duration-[8000ms]"
+                : "bg-transparent"
+            }`}
+          />
 
           {/* Grid Canvas Lines */}
           <div
@@ -1206,16 +1257,30 @@ export const BattleMap: React.FC<BattleMapProps> = ({
 
                 {/* Active Conditions Icons */}
                 {token.conditions.length > 0 && (
-                  <div className="absolute -right-2 top-0 flex flex-col gap-0.5">
-                    {token.conditions.slice(0, 2).map((c, idx) => (
-                      <span
-                        key={idx}
-                        className="w-3.5 h-3.5 bg-red-600 border border-white text-white rounded-full text-[8px] flex items-center justify-center font-bold"
-                        title={c}
-                      >
-                        !
-                      </span>
-                    ))}
+                  <div className="absolute -right-3 top-1 flex flex-col gap-1 z-30">
+                    {token.conditions.map((c, idx) => {
+                      const emojis: Record<string, string> = {
+                        sangrando: "🩸",
+                        atordoado: "😵",
+                        abençoado: "✨",
+                        abencoado: "✨",
+                        envenenado: "🧪",
+                        caído: "💀",
+                        caido: "💀",
+                        invisível: "👤",
+                        invisivel: "👤",
+                      };
+                      const emoji = emojis[c.toLowerCase()] || "🔸";
+                      return (
+                        <span
+                          key={idx}
+                          className="w-5 h-5 bg-neutral-900/90 border border-neutral-700/85 rounded-full text-xs flex items-center justify-center shadow-lg transform transition-transform hover:scale-110"
+                          title={c}
+                        >
+                          {emoji}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1437,6 +1502,36 @@ export const BattleMap: React.FC<BattleMapProps> = ({
             >
               +5
             </button>
+          </div>
+
+          <div className="hidden sm:block h-8 w-px bg-neutral-800" />
+
+          {/* Quick Conditions Toggle */}
+          <div className="flex items-center gap-1">
+            {[
+              { name: "Sangrando", emoji: "🩸", color: "hover:bg-red-500/25 border-red-500/30 text-red-400" },
+              { name: "Atordoado", emoji: "😵", color: "hover:bg-amber-500/25 border-amber-500/30 text-amber-400" },
+              { name: "Abençoado", emoji: "✨", color: "hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-400" },
+              { name: "Envenenado", emoji: "🧪", color: "hover:bg-purple-500/25 border-purple-500/30 text-purple-400" },
+              { name: "Caído", emoji: "💀", color: "hover:bg-neutral-500/25 border-neutral-500/30 text-neutral-400" },
+              { name: "Invisível", emoji: "👤", color: "hover:bg-blue-500/25 border-blue-500/30 text-blue-400" }
+            ].map((cond) => {
+              const isApplied = selectedToken.conditions.includes(cond.name);
+              return (
+                <button
+                  key={cond.name}
+                  onClick={() => handleToggleCondition(selectedToken.id, cond.name)}
+                  title={`${isApplied ? "Remover" : "Aplicar"} estado: ${cond.name}`}
+                  className={`w-7 h-7 flex items-center justify-center rounded-lg border text-sm transition-all active:scale-[0.92] ${
+                    isApplied
+                      ? "bg-amber-500 border-amber-400 text-neutral-950 scale-105 shadow-md shadow-amber-500/20"
+                      : `bg-neutral-800/80 border-neutral-700 ${cond.color}`
+                  }`}
+                >
+                  {cond.emoji}
+                </button>
+              );
+            })}
           </div>
 
           <div className="hidden sm:block h-8 w-px bg-neutral-800" />

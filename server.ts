@@ -26,6 +26,83 @@ function getGeminiAI(): GoogleGenAI | null {
   return aiClient;
 }
 
+// Robust helper with exponential backoff retries and model fallback cascade
+async function generateWithFallbackAndRetry(params: {
+  contents: any;
+  config?: any;
+  primaryModel?: string;
+  fallbackModel?: string;
+}): Promise<any> {
+  const { contents, config, primaryModel = "gemini-3.7-flash", fallbackModel = "gemini-3.1-flash-lite" } = params;
+  const ai = getGeminiAI();
+  if (!ai) {
+    throw new Error("Gemini API Key is not configured.");
+  }
+
+  // Create a robust cascade of models to try
+  const modelsToTry = [
+    primaryModel,
+    fallbackModel !== primaryModel ? fallbackModel : null,
+    "gemini-flash-latest"
+  ].filter((m): m is string => typeof m === "string" && !!m);
+
+  const maxRetries = 3;
+
+  for (const model of modelsToTry) {
+    let delay = 1000;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Gemini] Attempting generation with model ${model} (attempt ${attempt}/${maxRetries})...`);
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config,
+        });
+        return response;
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        console.error(`[Gemini] Error on model ${model}, attempt ${attempt}:`, errMsg);
+
+        // Check if this error is a daily quota exhaustion (RESOURCE_EXHAUSTED / Quota limit reached)
+        const isPermanentQuotaError =
+          errMsg.toLowerCase().includes("exceeded your current quota") ||
+          errMsg.toLowerCase().includes("quota exceeded") ||
+          errMsg.toLowerCase().includes("resource_exhausted") ||
+          errMsg.toLowerCase().includes("free_tier_requests") ||
+          errMsg.toLowerCase().includes("daily_limit") ||
+          err?.status === 429 && (errMsg.toLowerCase().includes("quota") || errMsg.toLowerCase().includes("limit"));
+
+        if (isPermanentQuotaError) {
+          console.warn(`[Gemini] Permanent daily quota limit reached for model ${model}. Transitioning immediately to next fallback without retrying.`);
+          break; // Break out of attempts loop immediately to try the next model
+        }
+
+        const isTransientError =
+          err?.status === 503 ||
+          err?.status === 429 ||
+          errMsg.includes("503") ||
+          errMsg.includes("429") ||
+          errMsg.toLowerCase().includes("high demand") ||
+          errMsg.toLowerCase().includes("unavailable") ||
+          errMsg.toLowerCase().includes("timeout");
+
+        if (attempt === maxRetries || !isTransientError) {
+          if (model === modelsToTry[modelsToTry.length - 1] && attempt === maxRetries) {
+            throw err;
+          }
+          break; // Break out of attempts loop to try the next model
+        }
+
+        console.log(`[Gemini] Waiting ${delay}ms before retrying due to transient overload...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
+  }
+
+  throw new Error("All model generation attempts failed.");
+}
+
 // In-Memory Multi-player Room Store
 interface RoomMessage {
   id: string;
@@ -331,6 +408,7 @@ function createInitialRoom(id: string, name: string, system: "dnd5e" | "ordem" |
     ],
     createdAt: Date.now(),
     lastUpdated: Date.now(),
+    version: 1,
   };
 }
 
@@ -434,7 +512,47 @@ app.post("/api/rooms/:id/update", (req: Request, res: Response) => {
     return res.status(404).json({ error: "Sala não encontrada" });
   }
 
-  const { tokens, map, maps, initiativeOrder, currentTurnIndex, roundNumber, inCombat, description, name } = req.body;
+  const {
+    clientVersion,
+    tokens,
+    map,
+    maps,
+    initiativeOrder,
+    currentTurnIndex,
+    roundNumber,
+    inCombat,
+    description,
+    name
+  } = req.body;
+
+  // Initialize room version if not present
+  if (room.version === undefined) {
+    room.version = 1;
+  }
+
+  // Check for Optimistic Concurrency Control conflict
+  if (clientVersion !== undefined && typeof clientVersion === "number") {
+    if (clientVersion < room.version) {
+      console.warn(`[OCC Conflict] Client version ${clientVersion} is outdated. Server version is ${room.version}.`);
+      return res.status(409).json({
+        error: "conflict",
+        message: "Conflito de sincronização detectado: o estado do tabuleiro foi modificado por outro jogador.",
+        serverVersion: room.version,
+        currentRoomState: {
+          tokens: room.tokens,
+          map: room.map,
+          maps: room.maps,
+          initiativeOrder: room.initiativeOrder,
+          currentTurnIndex: room.currentTurnIndex,
+          roundNumber: room.roundNumber,
+          inCombat: room.inCombat,
+          name: room.name,
+          description: room.description
+        }
+      });
+    }
+  }
+
   if (tokens !== undefined) room.tokens = tokens;
   if (map !== undefined) room.map = { ...room.map, ...map };
   if (maps !== undefined) room.maps = maps;
@@ -445,7 +563,10 @@ app.post("/api/rooms/:id/update", (req: Request, res: Response) => {
   if (description !== undefined) room.description = description;
   if (name !== undefined) room.name = name;
 
+  // Increment room version on successful update
+  room.version = room.version + 1;
   room.lastUpdated = Date.now();
+  
   res.json(room);
 });
 
@@ -569,20 +690,16 @@ Forneça uma narração emocionante (cerca de 2 a 3 parágrafos curtos e dinâmi
 `;
 
   try {
-    const ai = getGeminiAI();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: userPrompt,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.85,
-        },
-      });
+    const response = await generateWithFallbackAndRetry({
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.85,
+      },
+    });
 
-      const narrativeText = response.text || "O mestre observa em silêncio antes de descrever o eco sinistro das suas ações...";
-      return res.json({ text: narrativeText, source: "gemini-3.7-flash" });
-    }
+    const narrativeText = response.text || "O mestre observa em silêncio antes de descrever o eco sinistro das suas ações...";
+    return res.json({ text: narrativeText, source: "gemini-3.7-flash-or-fallback" });
   } catch (err) {
     console.error("Gemini AI error, fallback to procedural narrative:", err);
   }
@@ -642,22 +759,18 @@ Retorne em formato JSON válido contendo:
 }`;
 
   try {
-    const ai = getGeminiAI();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.7,
-        },
-      });
+    const response = await generateWithFallbackAndRetry({
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.7,
+      },
+    });
 
-      const text = response.text?.trim();
-      if (text) {
-        const parsed = JSON.parse(text);
-        return res.json(parsed);
-      }
+    const text = response.text?.trim();
+    if (text) {
+      const parsed = JSON.parse(text);
+      return res.json(parsed);
     }
   } catch (err) {
     console.error("NPC gen error:", err);
@@ -734,21 +847,17 @@ Retorne um JSON com:
 }`;
 
   try {
-    const ai = getGeminiAI();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.8,
-        },
-      });
+    const response = await generateWithFallbackAndRetry({
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.8,
+      },
+    });
 
-      const text = response.text?.trim();
-      if (text) {
-        return res.json(JSON.parse(text));
-      }
+    const text = response.text?.trim();
+    if (text) {
+      return res.json(JSON.parse(text));
     }
   } catch (err) {
     console.error("Encounter gen error:", err);
@@ -804,20 +913,16 @@ Retorne um JSON com:
 }`;
 
   try {
-    const ai = getGeminiAI();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+    const response = await generateWithFallbackAndRetry({
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
 
-      const text = response.text?.trim();
-      if (text) {
-        return res.json(JSON.parse(text));
-      }
+    const text = response.text?.trim();
+    if (text) {
+      return res.json(JSON.parse(text));
     }
   } catch (err) {
     console.error("Avatar prompt error:", err);
@@ -854,21 +959,17 @@ Retorne estritamente um JSON no formato:
 }`;
 
   try {
-    const ai = getGeminiAI();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: aiPrompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.85,
-        },
-      });
+    const response = await generateWithFallbackAndRetry({
+      contents: aiPrompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.85,
+      },
+    });
 
-      const text = response.text?.trim();
-      if (text) {
-        return res.json(JSON.parse(text));
-      }
+    const text = response.text?.trim();
+    if (text) {
+      return res.json(JSON.parse(text));
     }
   } catch (err) {
     console.error("Handout gen error:", err);
@@ -913,21 +1014,17 @@ Retorne um JSON estrito no formato:
 }`;
 
   try {
-    const ai = getGeminiAI();
-    if (ai) {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: aiPrompt,
-        config: {
-          responseMimeType: "application/json",
-          temperature: 0.8,
-        },
-      });
+    const response = await generateWithFallbackAndRetry({
+      contents: aiPrompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.8,
+      },
+    });
 
-      const text = response.text?.trim();
-      if (text) {
-        return res.json(JSON.parse(text));
-      }
+    const text = response.text?.trim();
+    if (text) {
+      return res.json(JSON.parse(text));
     }
   } catch (err) {
     console.error("Map prompt AI error:", err);

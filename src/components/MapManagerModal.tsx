@@ -16,7 +16,8 @@ import {
   Upload,
   Layers,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Search
 } from "lucide-react";
 
 interface MapManagerModalProps {
@@ -119,6 +120,7 @@ export function MapManagerModal({
   onClose,
 }: MapManagerModalProps) {
   const [activeTab, setActiveTab] = useState<"library" | "create" | "presets">("library");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Create Form State
   const [mapName, setMapName] = useState("");
@@ -135,6 +137,8 @@ export function MapManagerModal({
   // AI Map Generation State
   const [aiMapPrompt, setAiMapPrompt] = useState("");
   const [isGeneratingAiMap, setIsGeneratingAiMap] = useState(false);
+  const [aiMapLogs, setAiMapLogs] = useState<string[]>([]);
+  const [aiMapError, setAiMapError] = useState<string | null>(null);
 
   const handleGenerateAiMap = async () => {
     if (!aiMapPrompt.trim()) {
@@ -143,33 +147,101 @@ export function MapManagerModal({
     }
 
     setIsGeneratingAiMap(true);
+    setAiMapError(null);
+    setAiMapLogs([]);
+
+    const log = (msg: string) => {
+      setAiMapLogs((prev) => [...prev, msg]);
+    };
+
     try {
+      log("🔮 Estabelecendo canal seguro com o Mestre de IA (Gemini)...");
+      
+      // Step 1: Call Gemini to design the battle map prompt and config
+      log("🧠 Analisando tema e gerando prompt cartográfico otimizado via Gemini...");
+      const promptRes = await fetch("/api/ai/map-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system,
+          theme: aiMapPrompt,
+          lighting,
+        }),
+      });
+
+      let finalPromptToGen = `RPG battlemap top-down view, highly detailed overhead grid, ${aiMapPrompt}`;
+      let suggestedTitle = aiMapPrompt.length > 30 ? aiMapPrompt.slice(0, 30) + "..." : aiMapPrompt;
+
+      if (promptRes.ok) {
+        const promptData = await promptRes.json();
+        log(`📝 Gemini respondeu com sucesso!`);
+        if (promptData.title) {
+          suggestedTitle = promptData.title;
+          log(`🏷️ Título sugerido: "${promptData.title}"`);
+        }
+        if (promptData.suggestedGridSize) {
+          log(`📐 Grid recomendado: ${promptData.suggestedGridSize}`);
+          const parts = promptData.suggestedGridSize.match(/\d+/g);
+          if (parts && parts.length >= 2) {
+            const cols = parseInt(parts[0], 10);
+            const rows = parseInt(parts[1], 10);
+            if (!isNaN(cols) && cols > 0) {
+              setGridWidth(cols);
+              setGridHeight(rows || cols);
+            }
+          }
+        }
+        if (promptData.recommendedLighting) {
+          log(`💡 Iluminação recomendada: ${promptData.recommendedLighting}`);
+        }
+        if (promptData.keyElements && promptData.keyElements.length > 0) {
+          log(`✨ Elementos táticos: ${promptData.keyElements.slice(0, 3).join(", ")}`);
+        }
+        if (promptData.englishPrompt) {
+          finalPromptToGen = promptData.englishPrompt;
+        }
+      } else {
+        log("⚠️ Gemini indisponível no momento. Utilizando pré-processador local para o tema.");
+      }
+
+      // Step 2: Request the final map image generator
+      log("🎨 Forjando plano de fundo em alta resolução (IA Artística)...");
       const res = await fetch("/api/ai/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: aiMapPrompt,
+          prompt: finalPromptToGen,
           type: "map",
           system,
         }),
       });
 
-      if (!res.ok) throw new Error("Falha na geração de imagem de mapa.");
+      if (!res.ok) throw new Error("Erro na sintetização final da imagem de fundo.");
       const data = await res.json();
       if (data.imageUrl) {
         setBgUrl(data.imageUrl);
-        if (!mapName) {
-          const shortTitle = aiMapPrompt.length > 30 ? aiMapPrompt.slice(0, 30) + "..." : aiMapPrompt;
-          setMapName(shortTitle);
-        }
+        setMapName(suggestedTitle);
+        log("✅ Fundo do mapa gerado e sincronizado com sucesso absoluta!");
+      } else {
+        throw new Error("Resposta de imagem inválida da API.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro ao gerar mapa com IA:", err);
+      log("⚠️ Canal primário interrompido. Ativando contingência de redundância...");
+      
       const seed = Math.floor(Math.random() * 1000000);
       const encoded = encodeURIComponent(`RPG battlemap top-down view ${aiMapPrompt}`);
       const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&seed=${seed}&nologo=true`;
+      
       setBgUrl(fallbackUrl);
-      if (!mapName) setMapName(aiMapPrompt.slice(0, 30));
+      const shortTitle = aiMapPrompt.length > 30 ? aiMapPrompt.slice(0, 30) + "..." : aiMapPrompt;
+      setMapName(shortTitle);
+      
+      log("🔄 Imagem alternativa carregada com sucesso.");
+      setAiMapError(
+        "Aviso: O canal do Gemini ou da imagem primária falhou (chave ausente ou indisponibilidade). " +
+        "Mas não se preocupe! Ativamos nossa IA de contingência para gerar seu mapa."
+      );
     } finally {
       setIsGeneratingAiMap(false);
     }
@@ -305,109 +377,143 @@ export function MapManagerModal({
         {/* Modal Content */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1">
           {/* TAB 1: MAPS LIBRARY */}
-          {activeTab === "library" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-neutral-400">
+          {activeTab === "library" && (() => {
+            const filteredMaps = availableMaps.filter((mapItem) =>
+              mapItem.name.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+
+            return (
+              <div className="space-y-4">
+                {/* Search Bar & Header Actions */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-neutral-950/40 p-3 rounded-2xl border border-neutral-800/80">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Pesquisar mapas por nome..."
+                      className="w-full bg-neutral-905 border border-neutral-800/80 focus:border-amber-500/80 rounded-xl pl-9 pr-3 py-1.5 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 text-xs font-bold"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("create")}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-850 text-amber-400 hover:text-amber-300 rounded-xl border border-neutral-800/80 text-xs font-bold transition-all self-stretch sm:self-auto justify-center"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Novo Mapa</span>
+                  </button>
+                </div>
+
+                <div className="text-xs text-neutral-400">
                   Selecione um mapa para carregar instantaneamente na batalha:
-                </span>
-                <button
-                  onClick={() => setActiveTab("create")}
-                  className="flex items-center gap-1 text-xs font-bold text-amber-400 hover:text-amber-300"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Novo Mapa</span>
-                </button>
-              </div>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {availableMaps.map((mapItem) => {
-                  const isSelected = mapItem.id === currentMap.id || mapItem.name === currentMap.name;
-                  return (
-                    <div
-                      key={mapItem.id || mapItem.name}
-                      className={`rounded-2xl border p-3 flex flex-col justify-between gap-3 transition-all relative overflow-hidden ${
-                        isSelected
-                          ? "bg-amber-950/30 border-amber-500/80 shadow-lg ring-1 ring-amber-500/50"
-                          : "bg-neutral-950/60 border-neutral-800 hover:border-neutral-700"
-                      }`}
-                    >
-                      {/* Map Thumbnail / Background Preview */}
-                      <div className="h-28 rounded-xl bg-neutral-900 border border-neutral-800 relative overflow-hidden flex items-center justify-center">
-                        {mapItem.bgUrl ? (
-                          <img
-                            src={mapItem.bgUrl}
-                            alt={mapItem.name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center gap-1 text-neutral-600">
-                            <Grid className="w-8 h-8" />
-                            <span className="text-[10px]">Grid Liso</span>
+                {filteredMaps.length === 0 ? (
+                  <div className="p-8 rounded-2xl border border-dashed border-neutral-800/80 bg-neutral-950/20 text-center space-y-2">
+                    <Search className="w-8 h-8 text-neutral-600 mx-auto" />
+                    <div className="text-sm font-semibold text-neutral-400">Nenhum mapa encontrado</div>
+                    <div className="text-xs text-neutral-500">Nenhum resultado corresponde a "{searchQuery}"</div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {filteredMaps.map((mapItem) => {
+                      const isSelected = mapItem.id === currentMap.id || mapItem.name === currentMap.name;
+                      return (
+                        <div
+                          key={mapItem.id || mapItem.name}
+                          className={`rounded-2xl border p-3 flex flex-col justify-between gap-3 transition-all relative overflow-hidden ${
+                            isSelected
+                              ? "bg-amber-950/30 border-amber-500/80 shadow-lg ring-1 ring-amber-500/50"
+                              : "bg-neutral-950/60 border-neutral-800 hover:border-neutral-700"
+                          }`}
+                        >
+                          {/* Map Thumbnail / Background Preview */}
+                          <div className="h-28 rounded-xl bg-neutral-900 border border-neutral-800 relative overflow-hidden flex items-center justify-center">
+                            {mapItem.bgUrl ? (
+                              <img
+                                src={mapItem.bgUrl}
+                                alt={mapItem.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex flex-col items-center gap-1 text-neutral-600">
+                                <Grid className="w-8 h-8" />
+                                <span className="text-[10px]">Grid Liso</span>
+                              </div>
+                            )}
+
+                            <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 bg-neutral-950/80 backdrop-blur-sm rounded-lg text-[10px] text-neutral-300 border border-neutral-800">
+                              <Grid className="w-3 h-3 text-amber-400" />
+                              <span>{mapItem.gridWidth}x{mapItem.gridHeight}</span>
+                            </div>
+
+                            {isSelected && (
+                              <div className="absolute top-2 left-2 px-2 py-0.5 bg-amber-500 text-neutral-950 font-black text-[10px] rounded-lg shadow">
+                                Ativo na Mesa
+                              </div>
+                            )}
                           </div>
-                        )}
 
-                        <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 bg-neutral-950/80 backdrop-blur-sm rounded-lg text-[10px] text-neutral-300 border border-neutral-800">
-                          <Grid className="w-3 h-3 text-amber-400" />
-                          <span>{mapItem.gridWidth}x{mapItem.gridHeight}</span>
-                        </div>
-
-                        {isSelected && (
-                          <div className="absolute top-2 left-2 px-2 py-0.5 bg-amber-500 text-neutral-950 font-black text-[10px] rounded-lg shadow">
-                            Ativo na Mesa
+                          {/* Map Details */}
+                          <div>
+                            <h4 className="text-xs sm:text-sm font-bold text-neutral-100 truncate">
+                              {mapItem.name}
+                            </h4>
+                            <div className="flex items-center gap-2 text-[10px] text-neutral-400 mt-1">
+                              <span className="capitalize">
+                                Iluminação: {mapItem.lighting === "paranormal_fog" ? "Névoa Paranormal" : mapItem.lighting || "Normal"}
+                              </span>
+                              <span>•</span>
+                              <span>{mapItem.gridType === "hex" ? "Hexagonal" : "Quadrado"}</span>
+                            </div>
                           </div>
-                        )}
-                      </div>
 
-                      {/* Map Details */}
-                      <div>
-                        <h4 className="text-xs sm:text-sm font-bold text-neutral-100 truncate">
-                          {mapItem.name}
-                        </h4>
-                        <div className="flex items-center gap-2 text-[10px] text-neutral-400 mt-1">
-                          <span className="capitalize">
-                            Iluminação: {mapItem.lighting === "paranormal_fog" ? "Névoa Paranormal" : mapItem.lighting || "Normal"}
-                          </span>
-                          <span>•</span>
-                          <span>{mapItem.gridType === "hex" ? "Hexagonal" : "Quadrado"}</span>
+                          {/* Action buttons */}
+                          <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80">
+                            {isSelected ? (
+                              <span className="text-xs font-bold text-amber-400 flex items-center gap-1">
+                                <Check className="w-4 h-4" /> Em Exibição
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  onSelectMap(mapItem);
+                                  onClose();
+                                }}
+                                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+                              >
+                                <span>Ativar no Tabuleiro</span>
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {onDeleteMap && availableMaps.length > 1 && !isSelected && (
+                              <button
+                                onClick={() => onDeleteMap(mapItem.id || "")}
+                                className="p-1.5 text-neutral-500 hover:text-red-400 rounded-lg hover:bg-red-950/30 transition-colors"
+                                title="Remover mapa"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-
-                      {/* Action buttons */}
-                      <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80">
-                        {isSelected ? (
-                          <span className="text-xs font-bold text-amber-400 flex items-center gap-1">
-                            <Check className="w-4 h-4" /> Em Exibição
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              onSelectMap(mapItem);
-                              onClose();
-                            }}
-                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
-                          >
-                            <span>Ativar no Tabuleiro</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {onDeleteMap && availableMaps.length > 1 && !isSelected && (
-                          <button
-                            onClick={() => onDeleteMap(mapItem.id || "")}
-                            className="p-1.5 text-neutral-500 hover:text-red-400 rounded-lg hover:bg-red-950/30 transition-colors"
-                            title="Remover mapa"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* TAB 2: CREATE MAP */}
           {activeTab === "create" && (
@@ -501,6 +607,35 @@ export function MapManagerModal({
                     <span>{isGeneratingAiMap ? "Gerando..." : "Gerar Mapa IA"}</span>
                   </button>
                 </div>
+
+                {/* Live Console Logs */}
+                {(isGeneratingAiMap || aiMapLogs.length > 0) && (
+                  <div className="bg-black/90 rounded-xl p-3 border border-neutral-800 font-mono text-[10px] text-zinc-300 space-y-1 max-h-36 overflow-y-auto select-text">
+                    {aiMapLogs.map((logLine, idx) => (
+                      <div key={idx} className="leading-relaxed">
+                        <span className="text-amber-500 mr-1.5">›</span>
+                        {logLine}
+                      </div>
+                    ))}
+                    {isGeneratingAiMap && (
+                      <div className="flex items-center gap-1.5 text-amber-400/80 animate-pulse mt-1 font-bold">
+                        <span className="inline-block w-1 h-3.5 bg-amber-500 animate-pulse" />
+                        <span>Sintonizando mentes e mapas virtuais...</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Error/Fallback Panel */}
+                {aiMapError && (
+                  <div className="bg-amber-950/20 border border-amber-600/40 text-amber-200 text-[10px] rounded-xl p-3 select-text">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-300 mb-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                      <span>Nota de Redundância Operacional</span>
+                    </div>
+                    {aiMapError}
+                  </div>
+                )}
               </div>
 
               {/* Background Image Upload or URL */}

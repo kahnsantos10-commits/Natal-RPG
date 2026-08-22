@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   RPGSystem,
   UserRole,
@@ -26,14 +26,17 @@ import { InitiativeTracker } from "./components/InitiativeTracker";
 import { ChatPanel } from "./components/ChatPanel";
 import { SoundboardPanel } from "./components/SoundboardPanel";
 import { PhysicalTabletopCompanion } from "./components/PhysicalTabletopCompanion";
+import { SoloModeDashboard } from "./components/SoloModeDashboard";
 import { PlayerDisplayModal } from "./components/PlayerDisplayModal";
 import { SessionManagerModal } from "./components/SessionManagerModal";
 import { MapManagerModal } from "./components/MapManagerModal";
+import { RokuCastPanel } from "./components/RokuCastPanel";
 import { SessionHistoryModal } from "./components/SessionHistoryModal";
 import { CampaignBackupModal, CampaignBackupPayload } from "./components/CampaignBackupModal";
 import { Dice3DAnimationOverlay } from "./components/Dice3DAnimationOverlay";
 import { LoginScreen } from "./components/LoginScreen";
 import { OnboardingModal } from "./components/OnboardingModal";
+import { SystemGuideModal } from "./components/SystemGuideModal";
 import { rpgAudio } from "./utils/audioSynth";
 import {
   Compass,
@@ -63,7 +66,9 @@ import {
   Database,
   RotateCcw,
   RotateCw,
-  Trash2
+  Trash2,
+  BookOpen,
+  Wifi
 } from "lucide-react";
 
 // Clean Initial Blank Data (Sem exemplos mock - Pronto para testar do zero)
@@ -157,9 +162,27 @@ const blankCustomChar: CustomCharacter = {
 };
 
 export function App() {
-  // Play Mode: Physical Tabletop (Feito Fora) vs Virtual Tabletop (Feito Dentro)
-  const [playMode, setPlayMode] = useState<"physical" | "virtual">("physical");
+  // Play Mode: Physical Tabletop (Feito Fora) vs Virtual Tabletop (Feito Dentro) vs Solo (IA)
+  const [playMode, setPlayMode] = useState<"physical" | "virtual" | "solo">("physical");
+  const [isSimplifiedMenu, setIsSimplifiedMenu] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("rpg_simplified_menu");
+      return saved ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSimplifiedMenu = () => {
+    setIsSimplifiedMenu((prev) => {
+      const next = !prev;
+      localStorage.setItem("rpg_simplified_menu", JSON.stringify(next));
+      return next;
+    });
+  };
+
   const [showPlayerDisplayModal, setShowPlayerDisplayModal] = useState(false);
+  const [showRokuCastModal, setShowRokuCastModal] = useState(false);
 
   // Responsive Chat Drawer state (opens as sidebar on desktop, overlay on mobile/tablet)
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -223,6 +246,7 @@ export function App() {
   const [showSessionManager, setShowSessionManager] = useState(false);
   const [showMapManager, setShowMapManager] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showSystemGuide, setShowSystemGuide] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
 
   // Restore full campaign backup from JSON payload
@@ -327,6 +351,111 @@ export function App() {
   const [undoStack, setUndoStack] = useState<UndoStateSnapshot[]>([]);
   const [redoStack, setRedoStack] = useState<UndoStateSnapshot[]>([]);
   const [undoNotice, setUndoNotice] = useState<{ message: string; type: "undo" | "redo" } | null>(null);
+
+  // Synchronize room state with server (Optimistic Concurrency Control)
+  const [clientVersion, setClientVersion] = useState<number>(1);
+  const isIncomingSyncRef = useRef(false);
+
+  // Poll room state periodically
+  useEffect(() => {
+    let active = true;
+    if (!roomId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/rooms/${roomId}`);
+        if (res.ok && active) {
+          const room = await res.json();
+          const serverVersion = room.version || 1;
+          
+          if (serverVersion > clientVersion) {
+            console.log(`[Sync] Local state (${clientVersion}) is older than server state (${serverVersion}). Syncing.`);
+            isIncomingSyncRef.current = true;
+            
+            if (room.tokens) setTokens(room.tokens);
+            if (room.map) setMapData(room.map);
+            if (room.maps && room.maps.length > 0) setAvailableMaps(room.maps);
+            if (room.currentTurnIndex !== undefined) setCurrentTurnIndex(room.currentTurnIndex);
+            if (room.roundNumber !== undefined) setRoundNumber(room.roundNumber);
+            if (room.history) setHistoryEvents(room.history);
+            
+            setClientVersion(serverVersion);
+            
+            setTimeout(() => {
+              isIncomingSyncRef.current = false;
+            }, 80);
+          }
+        }
+      } catch (err) {
+        console.warn("[Sync] Error polling room state:", err);
+      }
+    }, 4000); // Poll every 4 seconds
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [roomId, clientVersion]);
+
+  // Push local updates to server when states change, with Optimistic Concurrency Control
+  useEffect(() => {
+    if (isIncomingSyncRef.current) return;
+    if (!roomId) return;
+
+    // Debounce state updates to server (especially for token dragging)
+    const timeout = setTimeout(() => {
+      const payload = {
+        clientVersion,
+        tokens,
+        map: mapData,
+        currentTurnIndex,
+        roundNumber,
+      };
+
+      fetch(`/api/rooms/${roomId}/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+        .then(async (res) => {
+          if (res.status === 409) {
+            // OCC Conflict detected! Reconcile state
+            const errData = await res.json();
+            console.warn("[Sync] Concurrency conflict detected! Reconciling state...", errData);
+            
+            if (errData.currentRoomState) {
+              isIncomingSyncRef.current = true;
+              const serverState = errData.currentRoomState;
+              
+              if (serverState.tokens) setTokens(serverState.tokens);
+              if (serverState.map) setMapData(serverState.map);
+              if (serverState.currentTurnIndex !== undefined) setCurrentTurnIndex(serverState.currentTurnIndex);
+              if (serverState.roundNumber !== undefined) setRoundNumber(serverState.roundNumber);
+              
+              setClientVersion(errData.serverVersion || 1);
+              
+              setUndoNotice({
+                message: "Conflito de sincronização resolvido automaticamente.",
+                type: "undo",
+              });
+              setTimeout(() => setUndoNotice(null), 3500);
+
+              setTimeout(() => {
+                isIncomingSyncRef.current = false;
+              }, 80);
+            }
+          } else if (res.ok) {
+            const updatedRoom = await res.json();
+            if (updatedRoom.version) {
+              setClientVersion(updatedRoom.version);
+            }
+          }
+        })
+        .catch((err) => console.warn("[Sync] Error syncing local state to server:", err));
+    }, 450);
+
+    return () => clearTimeout(timeout);
+  }, [tokens, mapData, currentTurnIndex, roundNumber, roomId]);
 
   // Save current game state snapshot into history stack before a mutation
   const pushUndoSnapshot = useCallback(
@@ -599,6 +728,7 @@ export function App() {
         if (room.maps && room.maps.length > 0) setAvailableMaps(room.maps);
         if (room.tokens) setTokens(room.tokens);
         if (room.history && room.history.length > 0) setHistoryEvents(room.history);
+        if (room.version) setClientVersion(room.version);
       }
     } catch (err) {
       console.warn("Could not fetch remote room, setting locally", err);
@@ -711,14 +841,14 @@ export function App() {
 
           <div className="h-5 w-px bg-neutral-800 hidden md:block" />
 
-          {/* DUAL MODE SELECTOR: FEITO FORA VS FEITO DENTRO */}
+          {/* TRIPLE PLAY MODE SELECTOR: PRESENCIAL VS VIRTUAL VS SOLO */}
           <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl p-0.5 sm:p-1 text-xs">
             <button
               onClick={() => {
                 setPlayMode("physical");
                 setActiveMainView("physical_companion");
               }}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-lg font-bold transition-all ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg font-bold transition-all ${
                 playMode === "physical"
                   ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 shadow-md"
                   : "text-neutral-400 hover:text-neutral-200"
@@ -726,7 +856,7 @@ export function App() {
               title="Mesa Presencial (Para jogar ao vivo com amigos, TV/Projetor, pistas impressas e dados reais)"
             >
               <Home className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="hidden sm:inline">Mesa Presencial (Fora)</span>
+              <span className="hidden sm:inline">Mesa Presencial</span>
               <span className="sm:hidden text-[11px]">Presencial</span>
             </button>
 
@@ -735,7 +865,7 @@ export function App() {
                 setPlayMode("virtual");
                 setActiveMainView("map");
               }}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-lg font-bold transition-all ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg font-bold transition-all ${
                 playMode === "virtual"
                   ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md"
                   : "text-neutral-400 hover:text-neutral-200"
@@ -743,10 +873,44 @@ export function App() {
               title="Mesa Virtual (Para jogar 100% online com Battlemap e miniaturas digitais)"
             >
               <Monitor className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="hidden sm:inline">Mesa Virtual (Dentro)</span>
+              <span className="hidden sm:inline">Mesa Virtual</span>
               <span className="sm:hidden text-[11px]">Virtual</span>
             </button>
+
+            <button
+              onClick={() => {
+                setPlayMode("solo");
+              }}
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg font-bold transition-all ${
+                playMode === "solo"
+                  ? "bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md"
+                  : "text-neutral-400 hover:text-neutral-200"
+              }`}
+              title="Modo Solo (Jogue sozinho com um Mestre IA narrando suas decisões!)"
+            >
+              <Sparkles className="w-3.5 h-3.5 flex-shrink-0 text-pink-400 animate-pulse" />
+              <span className="hidden sm:inline">Modo Solo (IA)</span>
+              <span className="sm:hidden text-[11px]">Solo</span>
+            </button>
           </div>
+
+          <div className="h-5 w-px bg-neutral-800 hidden md:block" />
+
+          {/* Beginner Mode Switch */}
+          <button
+            onClick={toggleSimplifiedMenu}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black transition-all border ${
+              isSimplifiedMenu
+                ? "bg-emerald-950/50 border-emerald-500/50 text-emerald-300 shadow-sm shadow-emerald-500/10"
+                : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700"
+            }`}
+            title="Alternar entre Menus Simplificados (Iniciantes) ou Completo (Avançados)"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden xs:inline">
+              {isSimplifiedMenu ? "Menus: Simples ✨" : "Menus: Completo 🛠️"}
+            </span>
+          </button>
 
           <div className="h-5 w-px bg-neutral-800 hidden xl:block" />
 
@@ -786,100 +950,107 @@ export function App() {
         </div>
 
         {/* Center Main Stage View Tabs (Desktop / Tablet Header) */}
-        <nav className="hidden md:flex items-center bg-neutral-900/90 border border-neutral-800 rounded-2xl p-1 overflow-x-auto max-w-full gap-1">
-          <button
-            onClick={() => setActiveMainView("physical_companion")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              activeMainView === "physical_companion"
-                ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 font-bold shadow"
-                : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
-            }`}
-          >
-            <Tv className="w-3.5 h-3.5" />
-            <span>Mesa Presencial</span>
-          </button>
-
-          {/* Map Tab with 2D / 3D Mode Selector */}
-          <div className="flex items-center bg-neutral-950/80 rounded-xl p-0.5 border border-neutral-800/80">
+        {playMode === "solo" ? (
+          <div className="hidden md:flex items-center gap-2 bg-gradient-to-r from-pink-950/40 to-purple-950/40 border border-pink-500/20 px-3.5 py-1.5 rounded-2xl shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
+            <span className="text-[11px] font-black text-pink-300 uppercase tracking-widest font-serif">Aventura Solo Ativa (Mestre IA)</span>
+          </div>
+        ) : (
+          <nav className="hidden md:flex items-center bg-neutral-900/90 border border-neutral-800 rounded-2xl p-1 overflow-x-auto max-w-full gap-1">
             <button
-              onClick={() => {
-                setActiveMainView("map");
-              }}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-                activeMainView === "map"
-                  ? "bg-amber-500 text-neutral-950 font-bold shadow"
-                  : "text-neutral-400 hover:text-neutral-200"
+              onClick={() => setActiveMainView("physical_companion")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                activeMainView === "physical_companion"
+                  ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 font-bold shadow"
+                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
               }`}
             >
-              <Compass className="w-3.5 h-3.5" />
-              <span>Mapa de Batalha</span>
+              <Tv className="w-3.5 h-3.5" />
+              <span>Mesa Presencial</span>
             </button>
 
-            {activeMainView === "map" && (
-              <div className="flex items-center border-l border-neutral-800 pl-1 ml-0.5 gap-0.5">
-                <button
-                  onClick={() => setMapViewMode("2d")}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider transition-all ${
-                    mapViewMode === "2d"
-                      ? "bg-amber-400 text-neutral-950"
-                      : "text-neutral-500 hover:text-neutral-300"
-                  }`}
-                  title="Modo Visão Tática 2D Grid"
-                >
-                  2D
-                </button>
-                <button
-                  onClick={() => setMapViewMode("3d")}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider transition-all ${
-                    mapViewMode === "3d"
-                      ? "bg-gradient-to-r from-amber-400 to-amber-500 text-neutral-950 shadow"
-                      : "text-amber-400 hover:text-amber-300 bg-amber-950/40"
-                  }`}
-                  title="Modo Visão 3D Relevo e 1ª Pessoa"
-                >
-                  3D 👁️
-                </button>
-              </div>
-            )}
-          </div>
+            {/* Map Tab with 2D / 3D Mode Selector */}
+            <div className="flex items-center bg-neutral-950/80 rounded-xl p-0.5 border border-neutral-800/80">
+              <button
+                onClick={() => {
+                  setActiveMainView("map");
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                  activeMainView === "map"
+                    ? "bg-amber-500 text-neutral-950 font-bold shadow"
+                    : "text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>Mapa de Batalha</span>
+              </button>
 
-          <button
-            onClick={() => setActiveMainView("sheet")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              activeMainView === "sheet"
-                ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 font-bold shadow"
-                : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Ficha Digital</span>
-          </button>
+              {activeMainView === "map" && (
+                <div className="flex items-center border-l border-neutral-800 pl-1 ml-0.5 gap-0.5">
+                  <button
+                    onClick={() => setMapViewMode("2d")}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider transition-all ${
+                      mapViewMode === "2d"
+                        ? "bg-amber-400 text-neutral-950"
+                        : "text-neutral-500 hover:text-neutral-300"
+                    }`}
+                    title="Modo Visão Tática 2D Grid"
+                  >
+                    2D
+                  </button>
+                  <button
+                    onClick={() => setMapViewMode("3d")}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider transition-all ${
+                      mapViewMode === "3d"
+                        ? "bg-gradient-to-r from-amber-400 to-amber-500 text-neutral-950 shadow"
+                        : "text-amber-400 hover:text-amber-300 bg-amber-950/40"
+                    }`}
+                    title="Modo Visão 3D Relevo e 1ª Pessoa"
+                  >
+                    3D 👁️
+                  </button>
+                </div>
+              )}
+            </div>
 
-          <button
-            onClick={() => setActiveMainView("ai_master")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              activeMainView === "ai_master"
-                ? "bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold shadow"
-                : "text-purple-400 hover:text-purple-200 hover:bg-purple-950/40"
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Mestre IA</span>
-          </button>
+            <button
+              onClick={() => setActiveMainView("sheet")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                activeMainView === "sheet"
+                  ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 font-bold shadow"
+                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Ficha Digital</span>
+            </button>
 
-          <button
-            onClick={() => setActiveMainView("soundboard")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              activeMainView === "soundboard"
-                ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 font-bold shadow"
-                : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
-            }`}
-          >
-            <Volume2 className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">Som & Trilhas</span>
-            <span className="lg:hidden">Som</span>
-          </button>
-        </nav>
+            <button
+              onClick={() => setActiveMainView("ai_master")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                activeMainView === "ai_master"
+                  ? "bg-gradient-to-r from-purple-600 to-purple-700 text-white font-bold shadow"
+                  : "text-purple-400 hover:text-purple-200 hover:bg-purple-950/40"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Mestre IA</span>
+            </button>
+
+            <button
+              onClick={() => setActiveMainView("soundboard")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                activeMainView === "soundboard"
+                  ? "bg-gradient-to-r from-amber-600 to-amber-500 text-neutral-950 font-bold shadow"
+                  : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
+              }`}
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">Som & Trilhas</span>
+              <span className="lg:hidden">Som</span>
+            </button>
+          </nav>
+        )}
 
         {/* Right Tools, Roles & Quick Launchers */}
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
@@ -893,6 +1064,7 @@ export function App() {
             <span className="hidden sm:inline">+ Criar Personagem</span>
             <span className="sm:hidden">+ Char</span>
           </button>
+
           {/* System Dropdown for Small Screens (< xl) */}
           <div className="xl:hidden">
             <select
@@ -906,102 +1078,176 @@ export function App() {
             </select>
           </div>
 
-          {/* Session / Room Code Quick Launcher */}
-          <button
-            onClick={() => setShowSessionManager(true)}
-            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-200 transition-all shadow-sm group"
-            title="Gerenciar Sessão, Criar Mesa ou Entrar por Código"
-          >
-            <Key className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
-            <span className="font-mono text-amber-400 hidden sm:inline tracking-wider font-bold">[{roomCode}]</span>
-            <span className="hidden xl:inline text-neutral-400 font-normal truncate max-w-[90px]">{roomName}</span>
-          </button>
-
-          {/* Map Manager Launcher */}
-          <button
-            onClick={() => setShowMapManager(true)}
-            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 transition-all"
-            title="Criar, Gerenciar e Alternar Mapas de Batalha"
-          >
-            <Layers className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Mapas</span>
-            <span className="px-1.5 py-0.2 bg-neutral-800 rounded-md text-[10px] text-amber-300 hidden md:inline">
-              {availableMaps.length}
-            </span>
-          </button>
-
-          {/* Session History & Chronicle Launcher */}
-          <button
-            onClick={() => setShowHistoryModal(true)}
-            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 transition-all"
-            title="Diário de Bordo & Histórico da Campanha"
-          >
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden md:inline">Histórico</span>
-            {historyEvents.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-md text-[10px] hidden lg:inline">
-                {historyEvents.length}
-              </span>
-            )}
-          </button>
-
-          {/* Backup & Restauração JSON */}
-          <button
-            onClick={() => setShowBackupModal(true)}
-            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-amber-300 transition-all"
-            title="Exportar ou Restaurar Backup Completo (.JSON)"
-          >
-            <Database className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden xl:inline">Backup</span>
-          </button>
-
-          {/* Reset / Clean to Zero */}
-          <button
-            onClick={handleResetToZero}
-            className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-red-500/60 text-red-400 hover:text-red-300 transition-all"
-            title="Limpar todos os dados e começar a testar do zero"
-          >
-            <Trash2 className="w-3.5 h-3.5 text-red-400" />
-            <span className="hidden xl:inline">Limpar do Zero</span>
-          </button>
-
-          {/* GM Undo & Redo Quick Actions */}
-          {userRole === "gm" && (
-            <div className="flex items-center gap-1">
+          {!isSimplifiedMenu ? (
+            <>
+              {/* Session / Room Code Quick Launcher */}
               <button
-                onClick={handleUndo}
-                disabled={undoStack.length === 0}
-                className={`flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                  undoStack.length > 0
-                    ? "bg-amber-950/80 border-amber-500/80 text-amber-300 hover:bg-amber-900 shadow-sm"
-                    : "bg-neutral-900/60 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
-                }`}
-                title={
-                  undoStack.length > 0
-                    ? `Desfazer última ação: ${undoStack[undoStack.length - 1].description} [Ctrl+Z]`
-                    : "Nenhuma ação recente para desfazer"
-                }
+                onClick={() => setShowSessionManager(true)}
+                className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-200 transition-all shadow-sm group"
+                title="Gerenciar Sessão, Criar Mesa ou Entrar por Código"
               >
-                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden lg:inline">Desfazer</span>
-                {undoStack.length > 0 && (
-                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-md text-[10px] font-mono font-bold">
-                    {undoStack.length}
+                <Key className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
+                <span className="font-mono text-amber-400 hidden sm:inline tracking-wider font-bold">[{roomCode}]</span>
+                <span className="hidden xl:inline text-neutral-400 font-normal truncate max-w-[90px]">{roomName}</span>
+              </button>
+
+              {/* Map Manager Launcher */}
+              <button
+                onClick={() => setShowMapManager(true)}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 transition-all"
+                title="Criar, Gerenciar e Alternar Mapas de Batalha"
+              >
+                <Layers className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Mapas</span>
+                <span className="px-1.5 py-0.2 bg-neutral-800 rounded-md text-[10px] text-amber-300 hidden md:inline">
+                  {availableMaps.length}
+                </span>
+              </button>
+
+              {/* Session History & Chronicle Launcher */}
+              <button
+                onClick={() => setShowHistoryModal(true)}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 transition-all"
+                title="Diário de Bordo & Histórico da Campanha"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden md:inline">Histórico</span>
+                {historyEvents.length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-md text-[10px] hidden lg:inline">
+                    {historyEvents.length}
                   </span>
                 )}
               </button>
 
-              {redoStack.length > 0 && (
+              {/* Backup & Restauração JSON */}
+              <button
+                onClick={() => setShowBackupModal(true)}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-amber-300 transition-all"
+                title="Exportar ou Restaurar Backup Completo (.JSON)"
+              >
+                <Database className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden xl:inline">Backup</span>
+              </button>
+            </>
+          ) : (
+            /* COMPACT GROUPED DROP-DOWN FOR BEGINNERS */
+            <div className="relative group">
+              <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 hover:text-white transition-all shadow-sm">
+                <ChevronDown className="w-3.5 h-3.5 text-amber-400 group-hover:translate-y-0.5 transition-transform" />
+                <span>Mais Opções</span>
+              </button>
+              <div className="absolute right-0 mt-2 w-52 bg-neutral-950 border border-neutral-800 rounded-2xl p-2 hidden group-hover:block hover:block shadow-2xl z-50 space-y-1 animate-in fade-in slide-in-from-top-1 duration-100">
+                <div className="px-3 py-1 text-[10px] text-neutral-500 font-extrabold uppercase tracking-wider border-b border-neutral-900 mb-1">
+                  Mesa & Conectividade
+                </div>
                 <button
-                  onClick={handleRedo}
-                  className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 hover:text-amber-300 rounded-xl text-xs font-bold transition-all shadow-sm"
-                  title={`Refazer ação: ${redoStack[redoStack.length - 1].description} [Ctrl+Y]`}
+                  onClick={() => setShowSessionManager(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs text-neutral-300 hover:bg-neutral-900 flex items-center gap-2 font-medium"
                 >
-                  <RotateCw className="w-3.5 h-3.5 text-neutral-400" />
-                  <span className="hidden xl:inline">Refazer</span>
+                  <Key className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Sessão: <span className="font-mono text-amber-400">[{roomCode}]</span></span>
                 </button>
-              )}
+                <button
+                  onClick={() => setShowMapManager(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs text-neutral-300 hover:bg-neutral-900 flex items-center gap-2 font-medium"
+                >
+                  <Layers className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Mapas ({availableMaps.length})</span>
+                </button>
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs text-neutral-300 hover:bg-neutral-900 flex items-center gap-2 font-medium"
+                >
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Histórico da Campanha</span>
+                </button>
+                <button
+                  onClick={() => setShowBackupModal(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs text-neutral-300 hover:bg-neutral-900 flex items-center gap-2 font-medium"
+                >
+                  <Database className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Backup JSON</span>
+                </button>
+                <button
+                  onClick={() => setShowRokuCastModal(true)}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs text-neutral-300 hover:bg-neutral-900 flex items-center gap-2 font-medium"
+                >
+                  <Wifi className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Roku TV Cast</span>
+                </button>
+                <div className="h-px bg-neutral-900 my-1" />
+                <button
+                  onClick={handleResetToZero}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs text-red-400 hover:bg-red-950/20 flex items-center gap-2 font-semibold"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Começar do Zero</span>
+                </button>
+              </div>
             </div>
+          )}
+
+          {/* Guia e Regras do RPG */}
+          <button
+            onClick={() => setShowSystemGuide(true)}
+            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600/10 border border-amber-500/30 hover:border-amber-400 text-amber-400 hover:bg-amber-600/20 transition-all shadow-sm"
+            title="Guia Completo e Regras de Como Jogar este Sistema"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">Guia do RPG</span>
+          </button>
+
+          {!isSimplifiedMenu && (
+            <>
+              {/* Reset / Clean to Zero */}
+              <button
+                onClick={handleResetToZero}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-neutral-900 border border-neutral-800 hover:border-red-500/60 text-red-400 hover:text-red-300 transition-all"
+                title="Limpar todos os dados e começar a testar do zero"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                <span className="hidden xl:inline">Limpar do Zero</span>
+              </button>
+
+              {/* GM Undo & Redo Quick Actions */}
+              {userRole === "gm" && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleUndo}
+                    disabled={undoStack.length === 0}
+                    className={`flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                      undoStack.length > 0
+                        ? "bg-amber-950/80 border-amber-500/80 text-amber-300 hover:bg-amber-900 shadow-sm"
+                        : "bg-neutral-900/60 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
+                    }`}
+                    title={
+                      undoStack.length > 0
+                        ? `Desfazer última ação: ${undoStack[undoStack.length - 1].description} [Ctrl+Z]`
+                        : "Nenhuma ação recente para desfazer"
+                    }
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden lg:inline">Desfazer</span>
+                    {undoStack.length > 0 && (
+                      <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-md text-[10px] font-mono font-bold">
+                        {undoStack.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {redoStack.length > 0 && (
+                    <button
+                      onClick={handleRedo}
+                      className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900 border border-neutral-800 hover:border-amber-500/60 text-neutral-300 hover:text-amber-300 rounded-xl text-xs font-bold transition-all shadow-sm"
+                      title={`Refazer ação: ${redoStack[redoStack.length - 1].description} [Ctrl+Y]`}
+                    >
+                      <RotateCw className="w-3.5 h-3.5 text-neutral-400" />
+                      <span className="hidden xl:inline">Refazer</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           {/* Open TV Display button */}
@@ -1013,6 +1259,18 @@ export function App() {
             <Tv className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Telão TV</span>
           </button>
+
+          {!isSimplifiedMenu && (
+            /* Transmit to Roku TV button */
+            <button
+              onClick={() => setShowRokuCastModal(true)}
+              className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-300 transition-all shadow-sm"
+              title="Transmitir mapas e pistas diretamente para seu aparelho Roku na TV"
+            >
+              <Wifi className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Roku Cast</span>
+            </button>
+          )}
 
           {/* Quick Dice Drawer Launcher */}
           <button
@@ -1106,97 +1364,122 @@ export function App() {
       <div className="flex-1 flex overflow-hidden relative pb-14 md:pb-0">
         {/* Main Stage View */}
         <main className="flex-1 h-full overflow-hidden relative">
-          {activeMainView === "physical_companion" && (
-            <PhysicalTabletopCompanion
+          {playMode === "solo" ? (
+            <SoloModeDashboard
               system={system}
-              userRole={userRole}
-              tokens={tokens}
-              mapData={mapData}
-              combatants={combatants}
-              onUpdateTokens={(newTokens) => setTokens(newTokens)}
-              onSendChatMessage={handleSendMessage}
-              onOpenPlayerDisplay={() => setShowPlayerDisplayModal(true)}
-              onUndo={handleUndo}
-              canUndo={undoStack.length > 0}
-              undoCount={undoStack.length}
-              lastUndoDescription={undoStack.length > 0 ? undoStack[undoStack.length - 1].description : undefined}
-              onSaveSnapshot={pushUndoSnapshot}
+              onSetSystem={(sys) => setSystem(sys)}
+              dndChar={dndChar}
+              ordemChar={ordemChar}
+              customChar={customChar}
+              onUpdateDndChar={(c) => setDndChar(c)}
+              onUpdateOrdemChar={(c) => setOrdemChar(c)}
+              onUpdateCustomChar={(c) => setCustomChar(c)}
+              onRollDiceAnimation={(roll) => {
+                setActiveRollingDice(roll);
+                handleSendRollToChat(roll);
+              }}
+              isSimplifiedMenu={isSimplifiedMenu}
             />
-          )}
-
-          {activeMainView === "map" && (
-            mapViewMode === "3d" ? (
-              <BattleMap3D
-                map={mapData}
-                tokens={tokens}
-                system={system}
-                userRole={userRole}
-                currentTurnTokenId={activeTurnCombatant?.id}
-                onUpdateTokens={(newTokens) => setTokens(newTokens)}
-                onUpdateMap={(newMap) => setMapData((prev) => ({ ...prev, ...newMap }))}
-                onSelectTokenForRoll={() => setShowDiceDrawer(true)}
-                onUndo={handleUndo}
-                canUndo={undoStack.length > 0}
-                onSaveSnapshot={pushUndoSnapshot}
-                onFallbackTo2D={() => setMapViewMode("2d")}
-              />
-            ) : (
-              <BattleMap
-                map={mapData}
-                tokens={tokens}
-                system={system}
-                userRole={userRole}
-                currentTurnTokenId={activeTurnCombatant?.id}
-                onUpdateTokens={(newTokens) => setTokens(newTokens)}
-                onUpdateMap={(newMap) => setMapData((prev) => ({ ...prev, ...newMap }))}
-                onSelectTokenForRoll={() => {
-                  setShowDiceDrawer(true);
-                }}
-                onUndo={handleUndo}
-                canUndo={undoStack.length > 0}
-                undoCount={undoStack.length}
-                lastUndoDescription={undoStack.length > 0 ? undoStack[undoStack.length - 1].description : undefined}
-                onSaveSnapshot={pushUndoSnapshot}
-              />
-            )
-          )}
-
-          {activeMainView === "sheet" && (
-            <div className="h-full w-full overflow-y-auto">
-              {system === "ordem" && (
-                <CharacterSheetOrdem
-                  character={ordemChar}
-                  onUpdate={(c) => setOrdemChar(c)}
-                  onSendRollToChat={handleSendRollToChat}
+          ) : (
+            <>
+              {activeMainView === "physical_companion" && (
+                <PhysicalTabletopCompanion
+                  system={system}
+                  userRole={userRole}
+                  tokens={tokens}
+                  mapData={mapData}
+                  combatants={combatants}
+                  onUpdateTokens={(newTokens) => setTokens(newTokens)}
+                  onSendChatMessage={handleSendMessage}
+                  onOpenPlayerDisplay={() => setShowPlayerDisplayModal(true)}
+                  onUndo={handleUndo}
+                  canUndo={undoStack.length > 0}
+                  undoCount={undoStack.length}
+                  lastUndoDescription={undoStack.length > 0 ? undoStack[undoStack.length - 1].description : undefined}
+                  onSaveSnapshot={pushUndoSnapshot}
                 />
               )}
-              {system === "dnd5e" && (
-                <CharacterSheetDnD
-                  character={dndChar}
-                  onUpdate={(c) => setDndChar(c)}
-                  onSendRollToChat={handleSendRollToChat}
+
+              {activeMainView === "map" && (
+                mapViewMode === "3d" ? (
+                  <BattleMap3D
+                    map={mapData}
+                    tokens={tokens}
+                    system={system}
+                    userRole={userRole}
+                    currentTurnTokenId={activeTurnCombatant?.id}
+                    onUpdateTokens={(newTokens) => setTokens(newTokens)}
+                    onUpdateMap={(newMap) => setMapData((prev) => ({ ...prev, ...newMap }))}
+                    onSelectTokenForRoll={() => setShowDiceDrawer(true)}
+                    onUndo={handleUndo}
+                    canUndo={undoStack.length > 0}
+                    onSaveSnapshot={pushUndoSnapshot}
+                    onFallbackTo2D={() => setMapViewMode("2d")}
+                  />
+                ) : (
+                  <BattleMap
+                    map={mapData}
+                    tokens={tokens}
+                    system={system}
+                    userRole={userRole}
+                    currentTurnTokenId={activeTurnCombatant?.id}
+                    onUpdateTokens={(newTokens) => setTokens(newTokens)}
+                    onUpdateMap={(newMap) => setMapData((prev) => ({ ...prev, ...newMap }))}
+                    onSelectTokenForRoll={() => {
+                      setShowDiceDrawer(true);
+                    }}
+                    onUndo={handleUndo}
+                    canUndo={undoStack.length > 0}
+                    undoCount={undoStack.length}
+                    lastUndoDescription={undoStack.length > 0 ? undoStack[undoStack.length - 1].description : undefined}
+                    onSaveSnapshot={pushUndoSnapshot}
+                  />
+                )
+              )}
+
+              {activeMainView === "sheet" && (
+                <div className="h-full w-full overflow-y-auto">
+                  {system === "ordem" && (
+                    <CharacterSheetOrdem
+                      character={ordemChar}
+                      onUpdate={(c) => setOrdemChar(c)}
+                      onSendRollToChat={handleSendRollToChat}
+                    />
+                  )}
+                  {system === "dnd5e" && (
+                    <CharacterSheetDnD
+                      character={dndChar}
+                      onUpdate={(c) => setDndChar(c)}
+                      onSendRollToChat={handleSendRollToChat}
+                    />
+                  )}
+                  {system === "custom" && (
+                    <CharacterSheetCustom
+                      character={customChar}
+                      onUpdate={(c) => setCustomChar(c)}
+                      onSendRollToChat={handleSendRollToChat}
+                    />
+                  )}
+                </div>
+              )}
+
+              {activeMainView === "ai_master" && (
+                <AIMasterPanel
+                  system={system}
+                  onSendToChat={(msg, role) => handleSendMessage(msg, "narration", role || "ai")}
+                  onAddTokenToMap={(tok) => setTokens((prev) => [...prev, tok])}
+                  onAddMap={(newMap) => setAvailableMaps((prev) => [...prev, newMap])}
+                  onSelectMap={(selectedMap) => {
+                    setMapData(selectedMap);
+                    setActiveMainView("map");
+                  }}
+                  activeCharacterName={system === "ordem" ? ordemChar.name : dndChar.name}
                 />
               )}
-              {system === "custom" && (
-                <CharacterSheetCustom
-                  character={customChar}
-                  onUpdate={(c) => setCustomChar(c)}
-                  onSendRollToChat={handleSendRollToChat}
-                />
-              )}
-            </div>
-          )}
 
-          {activeMainView === "ai_master" && (
-            <AIMasterPanel
-              system={system}
-              onSendToChat={(msg, role) => handleSendMessage(msg, "narration", role || "ai")}
-              onAddTokenToMap={(tok) => setTokens((prev) => [...prev, tok])}
-              activeCharacterName={system === "ordem" ? ordemChar.name : dndChar.name}
-            />
+              {activeMainView === "soundboard" && <SoundboardPanel />}
+            </>
           )}
-
-          {activeMainView === "soundboard" && <SoundboardPanel />}
         </main>
 
         {/* Desktop Chat Sidebar (Collapsible with smooth animation) */}
@@ -1383,8 +1666,25 @@ export function App() {
           combatants={combatants}
           currentTurnIndex={currentTurnIndex}
           revealedHandout={activeRevealedHandout}
+          availableMaps={availableMaps}
           onClose={() => setShowPlayerDisplayModal(false)}
         />
+      )}
+
+      {/* Roku Cast Panel Modal */}
+      {showRokuCastModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <RokuCastPanel
+            system={system}
+            mapBgUrl={mapData.bgUrl || ""}
+            mapName={mapData.name}
+            handoutImageUrl={activeRevealedHandout?.imageUrl}
+            handoutTitle={activeRevealedHandout?.title}
+            availableMaps={availableMaps}
+            onSelectMap={(map) => setMapData(map)}
+            onClose={() => setShowRokuCastModal(false)}
+          />
+        </div>
       )}
 
       {/* 4. Session & Room Code Access Modal */}
@@ -1507,6 +1807,14 @@ export function App() {
 
       {/* Onboarding Modal */}
       {showOnboarding && <OnboardingModal onClose={() => setShowOnboarding(false)} />}
+
+      {/* System Guide Modal */}
+      {showSystemGuide && (
+        <SystemGuideModal
+          currentSystem={system}
+          onClose={() => setShowSystemGuide(false)}
+        />
+      )}
     </div>
   );
 }

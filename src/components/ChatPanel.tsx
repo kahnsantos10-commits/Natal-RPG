@@ -52,9 +52,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-neutral-950 border-l border-neutral-800 text-neutral-100 select-text">
+    <div className={`flex flex-col h-full text-neutral-100 select-text border-l ${
+      system === "ordem"
+        ? "bg-[#07060a] border-purple-950/85"
+        : "bg-[#090806] border-neutral-900"
+    }`}>
       {/* Header */}
-      <div className="p-3.5 border-b border-neutral-800 bg-neutral-900/60 backdrop-blur flex items-center justify-between">
+      <div className={`p-3.5 border-b backdrop-blur flex items-center justify-between ${
+        system === "ordem"
+          ? "bg-[#0e0c15]/90 border-purple-950/85"
+          : "bg-[#110f0c]/90 border-neutral-900"
+      }`}>
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-amber-400" />
           <span className="font-serif font-bold text-xs text-amber-100">Registro & Chat da Sessão</span>

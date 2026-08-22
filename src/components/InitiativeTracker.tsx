@@ -15,7 +15,9 @@ import {
   Check,
   X,
   Target,
-  AlertCircle
+  AlertCircle,
+  Minimize2,
+  Maximize2
 } from "lucide-react";
 import { rpgAudio } from "../utils/audioSynth";
 
@@ -56,6 +58,7 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
 }) => {
   const [selectedCombatantForReaction, setSelectedCombatantForReaction] = useState<InitiativeCombatant | null>(null);
   const [reactionTriggerInput, setReactionTriggerInput] = useState("");
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const activeCombatant = combatants.length > 0 && currentTurnIndex >= 0 && currentTurnIndex < combatants.length
     ? combatants[currentTurnIndex]
@@ -170,8 +173,63 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
     );
   };
 
+  if (isCollapsed) {
+    return (
+      <div className={`text-neutral-100 rounded-2xl py-2 px-3 shadow-2xl flex items-center justify-between gap-3 backdrop-blur-md max-w-sm w-full select-none animate-in fade-in duration-150 border ${
+        system === "ordem"
+          ? "bg-[#09070f]/95 border-purple-500/40 shadow-lg shadow-purple-950/20"
+          : "bg-[#0c0a07]/95 border-amber-600/35 shadow-lg shadow-amber-950/20"
+      }`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 flex-shrink-0">
+            <Zap className="w-3.5 h-3.5 animate-pulse" />
+          </div>
+          <div className="min-w-0">
+            <span className="text-[9px] text-amber-400 font-extrabold block leading-none">Rodada {round}</span>
+            <span className="text-xs font-bold text-neutral-200 truncate block mt-0.5">
+              {activeCombatant ? activeCombatant.name : "Nenhum Ativo"}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {userRole === "gm" && (
+            <>
+              <button
+                onClick={onPreviousTurn}
+                className="p-1 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-lg transition-colors"
+                title="Turno Anterior"
+              >
+                <SkipForward className="w-3.5 h-3.5 rotate-180" />
+              </button>
+              <button
+                onClick={onNextTurn}
+                className="p-1 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-lg transition-colors"
+                title="Próximo Turno"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          <span className="text-neutral-700">|</span>
+          <button
+            onClick={() => setIsCollapsed(false)}
+            className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1"
+          >
+            <Maximize2 className="w-3 h-3" />
+            <span>Expandir</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-4 md:p-5 shadow-2xl space-y-4 text-neutral-100 max-w-md w-full">
+    <div className={`rounded-3xl p-4 md:p-5 shadow-2xl space-y-4 text-neutral-100 max-w-md w-full relative animate-in fade-in duration-150 border ${
+      system === "ordem"
+        ? "bg-[#08070e]/98 border-purple-500/35 shadow-lg shadow-purple-950/20"
+        : "bg-[#0b0907]/98 border-amber-600/30 shadow-lg shadow-amber-950/20"
+    }`}>
       {/* Header with Round & Controls */}
       <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
         <div className="flex items-center gap-2">
@@ -184,49 +242,59 @@ export const InitiativeTracker: React.FC<InitiativeTrackerProps> = ({
           </div>
         </div>
 
-        {userRole === "gm" && (
-          <div className="flex items-center gap-1.5">
-            {onUndo && (
-              <button
-                onClick={onUndo}
-                disabled={!canUndo}
-                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
-                  canUndo
-                    ? "bg-amber-950/80 border-amber-600/80 text-amber-300 hover:bg-amber-900 shadow-sm"
-                    : "bg-neutral-950 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
-                }`}
-                title={
-                  canUndo
-                    ? `Desfazer última ação: ${lastUndoDescription || "Desfazer"} [Ctrl+Z]`
-                    : "Nenhuma ação para desfazer"
-                }
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                <span>Desfazer</span>
-                {canUndo && undoCount && undoCount > 0 ? (
-                  <span className="px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[9px]">
-                    {undoCount}
-                  </span>
-                ) : null}
-              </button>
-            )}
+        <div className="flex items-center gap-2">
+          {userRole === "gm" && (
+            <div className="flex items-center gap-1.5">
+              {onUndo && (
+                <button
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                    canUndo
+                      ? "bg-amber-950/80 border-amber-600/80 text-amber-300 hover:bg-amber-900 shadow-sm"
+                      : "bg-neutral-950 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50"
+                  }`}
+                  title={
+                    canUndo
+                      ? `Desfazer última ação: ${lastUndoDescription || "Desfazer"} [Ctrl+Z]`
+                      : "Nenhuma ação para desfazer"
+                  }
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Desfazer</span>
+                  {canUndo && undoCount && undoCount > 0 ? (
+                    <span className="px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[9px]">
+                      {undoCount}
+                    </span>
+                  ) : null}
+                </button>
+              )}
 
-            <button
-              onClick={handleSortInitiative}
-              className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-bold rounded-lg"
-              title="Ordenar por maior iniciativa"
-            >
-              Ordenar
-            </button>
-            <button
-              onClick={onResetEncounter}
-              className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg"
-              title="Reiniciar Combate"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+              <button
+                onClick={handleSortInitiative}
+                className="px-2.5 py-1 bg-neutral-950 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-bold rounded-lg"
+                title="Ordenar por maior iniciativa"
+              >
+                Ordenar
+              </button>
+              <button
+                onClick={onResetEncounter}
+                className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg"
+                title="Reiniciar Combate"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={() => setIsCollapsed(true)}
+            className="p-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-amber-300 rounded-lg"
+            title="Minimizar Painel"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Active Turn Banner with Guardar Reação */}
